@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "khoji"
+version = "0.1.0"
+description = "Shabad-first and line-within-shabad retrieval MVP for Gurbani audio alignment experiments."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Yudhvir Singh" }]
+dependencies = []
+
+[project.scripts]
+khoji = "khoji.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/khoji"]
+
