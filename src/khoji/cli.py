@@ -7,6 +7,15 @@ from pathlib import Path
 
 from .corpus import CorpusError, load_shabads, validate_shabads
 from .retriever import KhojiIndex
+from .shabados import (
+    DEFAULT_SOURCE_NAME,
+    DEFAULT_TRANSLATION_SOURCES,
+    DEFAULT_TRANSLITERATION_LANGUAGE,
+    ShabadOsError,
+    export_shabads_jsonl,
+    inspect_shabados_v4,
+    load_shabados_v4,
+)
 
 
 DEFAULT_CORPUS = Path("data/sample/shabads.jsonl")
@@ -31,6 +40,27 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser = subparsers.add_parser("validate-corpus")
     validate_parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
 
+    shabados_info_parser = subparsers.add_parser("shabados-info")
+    shabados_info_parser.add_argument("--db", type=Path, required=True)
+    shabados_info_parser.add_argument("--json", action="store_true")
+
+    export_shabados_parser = subparsers.add_parser("export-shabados")
+    export_shabados_parser.add_argument("--db", type=Path, required=True)
+    export_shabados_parser.add_argument("--output", type=Path, required=True)
+    export_shabados_parser.add_argument("--source", default=DEFAULT_SOURCE_NAME)
+    export_shabados_parser.add_argument(
+        "--transliteration-language",
+        default=DEFAULT_TRANSLITERATION_LANGUAGE,
+    )
+    export_shabados_parser.add_argument(
+        "--translation-source",
+        action="append",
+        dest="translation_sources",
+        default=None,
+        help="May be repeated. Defaults to Sant Singh Khalsa English and Prof. Sahib Singh Punjabi.",
+    )
+    export_shabados_parser.add_argument("--limit", type=int)
+
     args = parser.parse_args(argv)
 
     try:
@@ -38,6 +68,29 @@ def main(argv: list[str] | None = None) -> int:
             shabads = load_shabads(args.corpus)
             validate_shabads(shabads)
             print(f"OK: {len(shabads)} shabads loaded from {args.corpus}")
+            return 0
+
+        if args.command == "shabados-info":
+            info = inspect_shabados_v4(args.db)
+            if args.json:
+                print(json.dumps(info, ensure_ascii=False, indent=2))
+            else:
+                _print_shabados_info(info)
+            return 0
+
+        if args.command == "export-shabados":
+            translation_sources = tuple(
+                args.translation_sources or DEFAULT_TRANSLATION_SOURCES
+            )
+            shabads = load_shabados_v4(
+                args.db,
+                source_name=args.source,
+                transliteration_language=args.transliteration_language,
+                translation_sources=translation_sources,
+                limit=args.limit,
+            )
+            export_shabads_jsonl(shabads, args.output)
+            print(f"Exported {len(shabads)} shabads to {args.output}")
             return 0
 
         if args.command == "identify":
@@ -55,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 _print_result(result)
             return 0
-    except (CorpusError, KeyError, ValueError) as exc:
+    except (CorpusError, ShabadOsError, KeyError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -100,3 +153,18 @@ def _print_result(result) -> None:
         )
         print(f"   {text}")
 
+
+def _print_shabados_info(info) -> None:
+    print("Sources:")
+    for row in info["sources"]:
+        print(f"- {row['name_english']} ({row['length']} {row['page_name_english']})")
+
+    print()
+    print("Transliteration languages:")
+    for row in info["languages"]:
+        print(f"- {row['name_english']} ({row['name_international']})")
+
+    print()
+    print("Translation sources:")
+    for row in info["translation_sources"]:
+        print(f"- {row['name_english']} [{row['language']}] for {row['source']}")

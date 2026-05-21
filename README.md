@@ -46,6 +46,30 @@ Khoji reads JSON or JSONL. Each shabad record contains metadata and ordered line
 
 The checked-in sample corpus is only a development fixture, not an authoritative Guru Granth Sahib database. Replace it with a licensed/canonical source before serious experiments.
 
+## Shabad OS Corpus
+
+Khoji's first real corpus path is the stable Shabad OS database release `4.8.7`.
+The SQLite file is large, so it is downloaded locally and ignored by Git.
+
+```bash
+python3 scripts/download_shabados_db.py
+PYTHONPATH=src python3 -m khoji shabados-info --db data/shabados/database.sqlite
+PYTHONPATH=src python3 -m khoji export-shabados \
+  --db data/shabados/database.sqlite \
+  --output data/shabados/sggs.jsonl
+PYTHONPATH=src python3 -m khoji identify \
+  --corpus data/shabados/sggs.jsonl \
+  --query "kahe re ban khojan jai"
+```
+
+By default the export uses:
+
+- Source: `Sri Guru Granth Sahib Ji`
+- Transliteration language: `English`
+- Translation sources: `Dr. Sant Singh Khalsa` and `Prof. Sahib Singh`
+
+The stable Shabad OS 4.x database stores the primary Gurmukhi field in its historical database encoding, while the Latin transliteration and translations are directly usable for retrieval. The newer Shabad OS 5.x prerelease has a different asset schema with Unicode primary lines; support for that schema should be added as a separate importer after we decide how to merge it with the 4.x transliteration tables.
+
 ## How It Works
 
 The MVP uses character n-gram TF-IDF retrieval:
@@ -73,4 +97,3 @@ kirtan audio -> ASR/phonetic/audio encoder output -> Khoji shabad + line retriev
 - Evaluate top-1/top-5 shabad accuracy.
 - Add line timestamps for a small subset and compare line-ranking quality.
 - Add sequence smoothing for live tracking.
-
