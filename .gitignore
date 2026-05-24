@@ -10,3 +10,5 @@ build/
 *.egg-info/
 data/shabados/*
 !data/shabados/.gitkeep
+data/phase1/*
+!data/phase1/.gitkeep

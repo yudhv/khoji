@@ -25,9 +25,7 @@ class KhojiIndex:
         self._shabad_vectorizer = CharNgramTfidf()
         self._shabad_vectors = self._shabad_vectorizer.fit_transform(shabad_documents)
 
-        self._line_indexes = {
-            shabad.shabad_id: _build_line_index(shabad) for shabad in shabads
-        }
+        self._line_indexes: dict[str, _LineIndex] = {}
 
     def search_shabads(self, query: str, top_k: int = 5) -> tuple[RankedShabad, ...]:
         query_vector = self._shabad_vectorizer.transform_one(query)
@@ -48,9 +46,13 @@ class KhojiIndex:
     def search_lines(
         self, query: str, shabad_id: str, top_k: int = 5
     ) -> tuple[RankedLine, ...]:
+        shabad = self._shabads_by_id.get(shabad_id)
+        if shabad is None:
+            raise KeyError(f"Unknown shabad_id: {shabad_id}")
         line_index = self._line_indexes.get(shabad_id)
         if line_index is None:
-            raise KeyError(f"Unknown shabad_id: {shabad_id}")
+            line_index = _build_line_index(shabad)
+            self._line_indexes[shabad_id] = line_index
 
         query_vector = line_index.vectorizer.transform_one(query)
         scored = sorted(
@@ -124,4 +126,3 @@ def _relative_confidences(scores: list[float]) -> list[float]:
     if total == 0:
         return [0.0 for _ in scores]
     return [max(score, 0.0) / total for score in scores]
-

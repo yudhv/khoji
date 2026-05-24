@@ -70,6 +70,43 @@ By default the export uses:
 
 The stable Shabad OS 4.x database stores the primary Gurmukhi field in its historical database encoding, while the Latin transliteration and translations are directly usable for retrieval. The newer Shabad OS 5.x prerelease has a different asset schema with Unicode primary lines; support for that schema should be added as a separate importer after we decide how to merge it with the 4.x transliteration tables.
 
+## Phase 1 Audio MVP
+
+Phase 1 proves the full local loop:
+
+```text
+audio clip -> benchmark transcript baseline -> Khoji retrieval -> HTML reader
+```
+
+Create the ignored local benchmark fixtures:
+
+```bash
+PYTHONPATH=src python3 scripts/create_phase1_benchmark.py \
+  --corpus data/shabados/sggs.jsonl \
+  --output-dir data/phase1/benchmark
+```
+
+Evaluate the benchmark:
+
+```bash
+PYTHONPATH=src python3 -m khoji evaluate-benchmark \
+  --corpus data/shabados/sggs.jsonl \
+  --manifest data/phase1/benchmark/manifest.jsonl \
+  --json
+```
+
+Run the local app:
+
+```bash
+PYTHONPATH=src python3 -m khoji serve \
+  --corpus data/shabados/sggs.jsonl \
+  --manifest data/phase1/benchmark/manifest.jsonl
+```
+
+Then open `http://127.0.0.1:8765`.
+
+The Phase 1 model is intentionally a benchmark harness, not the final audio model. It matches a known audio fixture by SHA-256, uses that fixture's transcript as the local baseline, and then runs the normal Khoji shabad-first/line-second retrieval. Unknown audio returns `unknown` instead of forcing a match. This gives us a working API, UI, evaluation loop, and data contract that can later swap in ASR, audio embeddings, source separation, or fine-tuned models.
+
 ## How It Works
 
 The MVP uses character n-gram TF-IDF retrieval:

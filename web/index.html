@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Khoji</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="reader" aria-live="polite">
+        <div id="emptyState" class="empty-state">
+          <h1>Khoji</h1>
+          <p>Record or upload a Phase 1 benchmark clip.</p>
+        </div>
+
+        <div id="resultView" class="result-view" hidden>
+          <div class="shabad-meta">
+            <div id="shabadTitle" class="shabad-title"></div>
+            <div id="shabadDetails" class="shabad-details"></div>
+          </div>
+          <div id="lineStack" class="line-stack"></div>
+        </div>
+
+        <div id="unknownView" class="unknown-view" hidden>
+          <h1>Not confident yet</h1>
+          <p id="unknownReason"></p>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="Audio controls">
+        <div class="control-row">
+          <label class="file-button">
+            <input id="audioFile" type="file" accept="audio/*" />
+            Upload clip
+          </label>
+          <select id="translationLanguage" aria-label="Translation language">
+            <option value="Punjabi" selected>Punjabi</option>
+            <option value="English">English</option>
+          </select>
+        </div>
+        <button id="micButton" class="mic-button" type="button" aria-pressed="false">
+          <span id="micIcon">●</span>
+          <span id="micLabel">Record</span>
+        </button>
+        <p id="statusText" class="status-text">Ready</p>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
+

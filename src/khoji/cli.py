@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 
 from .corpus import CorpusError, load_shabads, validate_shabads
+from .phase1 import evaluate_benchmark, write_benchmark_report
 from .retriever import KhojiIndex
+from .server import run_server
 from .shabados import (
     DEFAULT_SOURCE_NAME,
     DEFAULT_TRANSLATION_SOURCES,
@@ -40,6 +42,18 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser = subparsers.add_parser("validate-corpus")
     validate_parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
 
+    serve_parser = subparsers.add_parser("serve")
+    serve_parser.add_argument("--corpus", type=Path, default=Path("data/shabados/sggs.jsonl"))
+    serve_parser.add_argument("--manifest", type=Path, default=Path("data/phase1/benchmark/manifest.jsonl"))
+    serve_parser.add_argument("--host", default="127.0.0.1")
+    serve_parser.add_argument("--port", type=int, default=8765)
+
+    benchmark_parser = subparsers.add_parser("evaluate-benchmark")
+    benchmark_parser.add_argument("--corpus", type=Path, default=Path("data/shabados/sggs.jsonl"))
+    benchmark_parser.add_argument("--manifest", type=Path, required=True)
+    benchmark_parser.add_argument("--output", type=Path)
+    benchmark_parser.add_argument("--json", action="store_true")
+
     shabados_info_parser = subparsers.add_parser("shabados-info")
     shabados_info_parser.add_argument("--db", type=Path, required=True)
     shabados_info_parser.add_argument("--json", action="store_true")
@@ -68,6 +82,29 @@ def main(argv: list[str] | None = None) -> int:
             shabads = load_shabads(args.corpus)
             validate_shabads(shabads)
             print(f"OK: {len(shabads)} shabads loaded from {args.corpus}")
+            return 0
+
+        if args.command == "serve":
+            run_server(
+                corpus_path=args.corpus,
+                manifest_path=args.manifest,
+                host=args.host,
+                port=args.port,
+            )
+            return 0
+
+        if args.command == "evaluate-benchmark":
+            report = evaluate_benchmark(args.corpus, args.manifest)
+            if args.output:
+                write_benchmark_report(report, args.output)
+            if args.json or not args.output:
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+            else:
+                print(
+                    "Benchmark OK: "
+                    f"shabad_top1={report['shabad_top1_accuracy']:.3f}, "
+                    f"line_top3={report['line_top3_accuracy']:.3f}"
+                )
             return 0
 
         if args.command == "shabados-info":
