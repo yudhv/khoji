@@ -107,6 +107,18 @@ Then open `http://127.0.0.1:8765`.
 
 The Phase 1 model is intentionally a benchmark harness, not the final audio model. It matches a known audio fixture by SHA-256, uses that fixture's transcript as the local baseline, and then runs the normal Khoji shabad-first/line-second retrieval. Unknown audio returns `unknown` instead of forcing a match. This gives us a working API, UI, evaluation loop, and data contract that can later swap in ASR, audio embeddings, source separation, or fine-tuned models.
 
+The generated WAV files from `create_phase1_benchmark.py` are smoke-test fixtures only. They are not training data. Put real recordings under ignored local data and register them separately:
+
+```bash
+PYTHONPATH=src python3 scripts/register_phase1_recording.py \
+  --audio data/phase1/benchmark/audio/kahe.mp3 \
+  --recording-id kahe_re_ban_full_001 \
+  --query "kahe re ban khojan jai" \
+  --notes "Full vocal recording of Kahe Re Ban Khojan Jaayi"
+```
+
+That writes `data/phase1/recordings/manifest.jsonl` with shabad-level metadata, duration, and hash. Line-level training still needs a separate timestamp file before the recording can supervise current-line prediction.
+
 ## Phase 2 Live Chunk MVP
 
 The same server also exposes live chunking:
