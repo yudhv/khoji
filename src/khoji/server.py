@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .phase1 import DEFAULT_TRANSLATION_LANGUAGE, Phase1Identifier
+from .phase2 import SequenceSmoother
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -53,13 +54,17 @@ def create_server(
 
 
 def _make_handler(identifier: Phase1Identifier, static_dir: Path):
+    live_sessions: dict[str, SequenceSmoother] = {}
+
     class KhojiRequestHandler(BaseHTTPRequestHandler):
         server_version = "KhojiHTTP/0.1"
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path == "/api/health":
-                self._send_json({"ok": True, "clips": len(identifier.clips)})
+                self._send_json(
+                    {"ok": True, "clips": len(identifier.clips), "live_sessions": len(live_sessions)}
+                )
                 return
             if parsed.path == "/":
                 self._send_static_file(static_dir / "index.html")
@@ -84,6 +89,34 @@ def _make_handler(identifier: Phase1Identifier, static_dir: Path):
                         audio_bytes,
                         translation_language=language,
                     )
+                    self._send_json(result)
+                    return
+                if parsed.path == "/api/live-chunk":
+                    body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                    audio_bytes, fields = _extract_audio_request(
+                        body,
+                        self.headers.get("Content-Type", ""),
+                    )
+                    query = parse_qs(parsed.query)
+                    session_id = (
+                        fields.get("session_id")
+                        or (query.get("session_id") or ["default"])[0]
+                        or "default"
+                    )
+                    language = fields.get("translation_language", DEFAULT_TRANSLATION_LANGUAGE)
+                    raw_result = identifier.identify_audio(
+                        audio_bytes,
+                        translation_language=language,
+                    )
+                    smoother = live_sessions.setdefault(
+                        session_id,
+                        SequenceSmoother(identifier),
+                    )
+                    result = smoother.update(
+                        raw_result,
+                        translation_language=language,
+                    )
+                    result["session_id"] = session_id
                     self._send_json(result)
                     return
                 if parsed.path == "/api/identify-text":

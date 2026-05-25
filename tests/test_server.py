@@ -45,19 +45,44 @@ class ServerTests(unittest.TestCase):
                         if not line["is_active"]
                     )
                 )
+
+                live_response = _post_multipart_audio(
+                    f"{base_url}/api/live-chunk",
+                    audio_path.read_bytes(),
+                    session_id="test-session",
+                )
+                self.assertEqual(live_response["status"], "identified")
+                self.assertEqual(live_response["session_id"], "test-session")
+                self.assertEqual(live_response["live"]["status"], "accepted")
             finally:
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
 
 
-def _post_multipart_audio(url: str, audio_bytes: bytes) -> dict:
+def _post_multipart_audio(
+    url: str,
+    audio_bytes: bytes,
+    *,
+    session_id: str | None = None,
+) -> dict:
     boundary = "----KhojiBoundary"
-    body = b"".join(
+    parts = [
+        f"--{boundary}\r\n".encode("utf-8"),
+        b'Content-Disposition: form-data; name="translation_language"\r\n\r\n',
+        b"Punjabi\r\n",
+    ]
+    if session_id is not None:
+        parts.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                b'Content-Disposition: form-data; name="session_id"\r\n\r\n',
+                session_id.encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    parts.extend(
         [
-            f"--{boundary}\r\n".encode("utf-8"),
-            b'Content-Disposition: form-data; name="translation_language"\r\n\r\n',
-            b"Punjabi\r\n",
             f"--{boundary}\r\n".encode("utf-8"),
             b'Content-Disposition: form-data; name="audio"; filename="clip.wav"\r\n',
             b"Content-Type: audio/wav\r\n\r\n",
@@ -66,6 +91,7 @@ def _post_multipart_audio(url: str, audio_bytes: bytes) -> dict:
             f"--{boundary}--\r\n".encode("utf-8"),
         ]
     )
+    body = b"".join(parts)
     request = Request(
         url,
         data=body,
@@ -136,4 +162,3 @@ def _write_corpus_fixture(directory: Path) -> Path:
 
 if __name__ == "__main__":
     unittest.main()
-

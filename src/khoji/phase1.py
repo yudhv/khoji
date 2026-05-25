@@ -155,6 +155,30 @@ class Phase1Identifier:
             "unknown_reason": None,
         }
 
+    def response_for_line(
+        self,
+        base_response: dict[str, Any],
+        *,
+        shabad_id: str,
+        line_id: str,
+        translation_language: str | None = None,
+    ) -> dict[str, Any]:
+        shabad = self._shabads_by_id[shabad_id]
+        language = translation_language or self.translation_language
+        context_lines = _context_lines(
+            shabad,
+            line_id,
+            translation_language=language,
+        )
+        active_context_line = next(line for line in context_lines if line["is_active"])
+        response = dict(base_response)
+        response["status"] = "identified"
+        response["shabad"] = _shabad_payload(shabad)
+        response["active_line"] = active_context_line
+        response["context_lines"] = context_lines
+        response["unknown_reason"] = None
+        return response
+
 
 def load_benchmark_manifest(path: str | Path | None) -> list[BenchmarkClip]:
     if path is None:
@@ -324,6 +348,8 @@ def _ranked_line_payload(candidate: RankedLine) -> dict[str, Any]:
         "shabad_id": candidate.line.shabad_id,
         "order": candidate.line.order,
         "text": candidate.line.transliteration or candidate.line.gurmukhi,
+        "section": candidate.line.section,
+        "is_refrain": candidate.line.is_refrain,
         "score": candidate.score,
         "confidence": candidate.confidence,
     }
@@ -343,4 +369,3 @@ def _unknown_response(reason: str, audio_sha256: str | None = None) -> dict[str,
         "unknown_reason": reason,
         "audio_sha256": audio_sha256,
     }
-

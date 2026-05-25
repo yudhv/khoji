@@ -107,6 +107,25 @@ Then open `http://127.0.0.1:8765`.
 
 The Phase 1 model is intentionally a benchmark harness, not the final audio model. It matches a known audio fixture by SHA-256, uses that fixture's transcript as the local baseline, and then runs the normal Khoji shabad-first/line-second retrieval. Unknown audio returns `unknown` instead of forcing a match. This gives us a working API, UI, evaluation loop, and data contract that can later swap in ASR, audio embeddings, source separation, or fine-tuned models.
 
+## Phase 2 Live Chunk MVP
+
+The same server also exposes live chunking:
+
+```text
+rolling browser mic window -> POST /api/live-chunk -> sequence smoother -> reader response
+```
+
+The browser records two-second chunks, keeps the latest five chunks as an 8-10 second rolling window, and posts that window with a `session_id`. The server keeps one smoother per session. The smoother accepts same-line, next-line, rahao/refrain, and small backward movements; it holds the previous accepted line through one-off shabad jumps and returns `unknown` for audio chunks that are not recognized by the current Phase 1 benchmark harness.
+
+You can smoke-test the live API with a generated fixture:
+
+```bash
+curl -F session_id=demo \
+  -F translation_language=Punjabi \
+  -F audio=@data/phase1/benchmark/audio/kahe_re_ban_kirtan_001.wav \
+  http://127.0.0.1:8765/api/live-chunk
+```
+
 ## How It Works
 
 The MVP uses character n-gram TF-IDF retrieval:

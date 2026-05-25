@@ -13,6 +13,9 @@ const lineStack = document.getElementById("lineStack");
 
 let recorder = null;
 let chunks = [];
+let sessionId = makeSessionId();
+const CHUNK_MS = 2000;
+const ROLLING_CHUNKS = 5;
 
 audioFile.addEventListener("change", async () => {
   const file = audioFile.files?.[0];
@@ -29,23 +32,27 @@ micButton.addEventListener("click", async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     chunks = [];
+    sessionId = makeSessionId();
     recorder = new MediaRecorder(stream);
-    recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
+    recorder.addEventListener("dataavailable", async (event) => {
+      if (event.data.size === 0) return;
+      chunks.push(event.data);
+      chunks = chunks.slice(-ROLLING_CHUNKS);
+      const windowBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      await identifyLiveChunk(windowBlob);
     });
     recorder.addEventListener("stop", async () => {
       stream.getTracks().forEach((track) => track.stop());
       micButton.classList.remove("recording");
       micButton.setAttribute("aria-pressed", "false");
       micLabel.textContent = "Record";
-      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-      await identifyAudio(blob);
+      setStatus("Stopped");
     });
-    recorder.start();
+    recorder.start(CHUNK_MS);
     micButton.classList.add("recording");
     micButton.setAttribute("aria-pressed", "true");
     micLabel.textContent = "Stop";
-    setStatus("Recording...");
+    setStatus("Listening live...");
   } catch (error) {
     setStatus(`Mic unavailable: ${error.message}`);
   }
@@ -69,6 +76,34 @@ async function identifyAudio(blob) {
     renderResult(result);
   } catch (error) {
     renderUnknown(error.message);
+  }
+}
+
+async function identifyLiveChunk(blob) {
+  const form = new FormData();
+  form.append("audio", blob, "live-window.webm");
+  form.append("translation_language", translationLanguage.value);
+  form.append("session_id", sessionId);
+
+  try {
+    const response = await fetch("/api/live-chunk", {
+      method: "POST",
+      body: form,
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      throw new Error(result.error || "Live request failed");
+    }
+    renderResult(result);
+    if (result.live?.status === "holding") {
+      setStatus("Holding steady...");
+    } else if (result.live?.status === "unknown") {
+      setStatus("Listening...");
+    } else {
+      setStatus("Live");
+    }
+  } catch (error) {
+    setStatus(`Live chunk failed: ${error.message}`);
   }
 }
 
@@ -120,3 +155,7 @@ function setStatus(text) {
   statusText.textContent = text;
 }
 
+function makeSessionId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
