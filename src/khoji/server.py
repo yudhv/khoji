@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .asr import AudioTranscriber
 from .phase1 import DEFAULT_TRANSLATION_LANGUAGE, Phase1Identifier
 from .phase2 import SequenceSmoother
 
@@ -28,6 +29,7 @@ def run_server(
     host: str = "127.0.0.1",
     port: int = 8765,
     static_dir: str | Path = DEFAULT_STATIC_DIR,
+    audio_transcriber: AudioTranscriber | None = None,
 ) -> None:
     server = create_server(
         corpus_path=corpus_path,
@@ -35,6 +37,7 @@ def run_server(
         host=host,
         port=port,
         static_dir=static_dir,
+        audio_transcriber=audio_transcriber,
     )
     print(f"Khoji server listening on http://{host}:{port}")
     server.serve_forever()
@@ -47,8 +50,13 @@ def create_server(
     host: str = "127.0.0.1",
     port: int = 8765,
     static_dir: str | Path = DEFAULT_STATIC_DIR,
+    audio_transcriber: AudioTranscriber | None = None,
 ) -> ThreadingHTTPServer:
-    identifier = Phase1Identifier(corpus_path, manifest_path)
+    identifier = Phase1Identifier(
+        corpus_path,
+        manifest_path,
+        audio_transcriber=audio_transcriber,
+    )
     handler = _make_handler(identifier, Path(static_dir))
     return ThreadingHTTPServer((host, port), handler)
 
@@ -129,7 +137,7 @@ def _make_handler(identifier: Phase1Identifier, static_dir: Path):
                         identifier.identify_text(query, translation_language=language)
                     )
                     return
-            except (KhojiServerError, ValueError, json.JSONDecodeError) as exc:
+            except (KhojiServerError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._send_error(HTTPStatus.NOT_FOUND, "Not found")

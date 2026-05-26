@@ -11,9 +11,14 @@ requires-python = ">=3.11"
 authors = [{ name = "Yudhvir Singh" }]
 dependencies = []
 
+[project.optional-dependencies]
+asr = [
+  "torch>=2.2",
+  "transformers>=4.40",
+]
+
 [project.scripts]
 khoji = "khoji.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/khoji"]
-

@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .asr import AudioTranscriber
 from .corpus import load_shabads
 from .models import Line, RankedLine, RankedShabad, Shabad
 from .retriever import KhojiIndex
@@ -61,9 +62,11 @@ class Phase1Identifier:
         manifest_path: str | Path | None = None,
         *,
         translation_language: str = DEFAULT_TRANSLATION_LANGUAGE,
+        audio_transcriber: AudioTranscriber | None = None,
     ) -> None:
         self.corpus_path = Path(corpus_path)
         self.translation_language = translation_language
+        self.audio_transcriber = audio_transcriber
         self.shabads = load_shabads(self.corpus_path)
         self.index = KhojiIndex(self.shabads)
         self._shabads_by_id = {shabad.shabad_id: shabad for shabad in self.shabads}
@@ -79,9 +82,15 @@ class Phase1Identifier:
         digest = sha256_bytes(audio_bytes)
         clip = self._clips_by_sha.get(digest)
         if clip is None:
-            return _unknown_response(
-                "audio fingerprint not found in the Phase 1 benchmark manifest",
+            if self.audio_transcriber is None:
+                return _unknown_response(
+                    "audio fingerprint not found in the Phase 1 benchmark manifest",
+                    digest,
+                )
+            return self._identify_audio_with_transcriber(
+                audio_bytes,
                 digest,
+                translation_language=translation_language,
             )
         if not clip.transcript:
             return _unknown_response(
@@ -109,6 +118,40 @@ class Phase1Identifier:
             "label_line_id": clip.line_id,
         }
         response["audio_sha256"] = digest
+        return response
+
+    def _identify_audio_with_transcriber(
+        self,
+        audio_bytes: bytes,
+        digest: str,
+        *,
+        translation_language: str | None = None,
+    ) -> dict[str, Any]:
+        assert self.audio_transcriber is not None
+        transcription = self.audio_transcriber.transcribe_bytes(audio_bytes)
+        if not transcription.text:
+            return _unknown_response("ASR returned an empty transcript", digest)
+
+        response = self.identify_text(
+            transcription.text,
+            translation_language=translation_language,
+        )
+        response["model_votes"].insert(
+            0,
+            {
+                "model": transcription.model,
+                "confidence": transcription.confidence,
+                "detail": "transcribed audio, then queried Khoji text retrieval",
+                "metadata": transcription.metadata,
+            },
+        )
+        response["audio_sha256"] = digest
+        response["asr"] = {
+            "model": transcription.model,
+            "text": transcription.text,
+            "confidence": transcription.confidence,
+            "metadata": transcription.metadata,
+        }
         return response
 
     def identify_text(

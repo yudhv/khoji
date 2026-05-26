@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from khoji.asr import TranscriptionResult
 from khoji.phase1 import (
     BenchmarkClip,
     Phase1Identifier,
@@ -44,6 +45,24 @@ class Phase1IdentifierTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "unknown")
             self.assertIn("fingerprint", result["unknown_reason"])
+
+    def test_unknown_audio_can_fall_back_to_asr_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = _write_corpus_fixture(root)
+            manifest_path, _ = _write_manifest_fixture(root)
+            identifier = Phase1Identifier(
+                corpus_path,
+                manifest_path,
+                audio_transcriber=_FakeTranscriber("kahe re ban khojan jai"),
+            )
+
+            result = identifier.identify_audio(b"new audio bytes")
+
+            self.assertEqual(result["status"], "identified")
+            self.assertEqual(result["query"], "kahe re ban khojan jai")
+            self.assertEqual(result["asr"]["model"], "fake-asr")
+            self.assertEqual(result["active_line"]["line_id"], "kahe_re_ban_001")
 
     def test_evaluates_benchmark_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -124,6 +143,19 @@ def _write_corpus_fixture(directory: Path) -> Path:
     }
     corpus_path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
     return corpus_path
+
+
+class _FakeTranscriber:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def transcribe_bytes(self, audio_bytes: bytes) -> TranscriptionResult:
+        return TranscriptionResult(
+            text=self.text,
+            model="fake-asr",
+            confidence=0.9,
+            metadata={"bytes": len(audio_bytes)},
+        )
 
 
 if __name__ == "__main__":

@@ -119,6 +119,48 @@ PYTHONPATH=src python3 scripts/register_phase1_recording.py \
 
 That writes `data/phase1/recordings/manifest.jsonl` with shabad-level metadata, duration, and hash. Line-level training still needs a separate timestamp file before the recording can supervise current-line prediction.
 
+### Surt ASR Baseline
+
+Khoji can also use `surindersinghssj/surt-small-v3` as an optional ASR fallback for audio that is not in the Phase 1 manifest. This keeps the benchmark path deterministic while allowing arbitrary vocal audio to be transcribed and queried against the complete Shabad OS corpus.
+
+Install the optional ASR stack:
+
+```bash
+python3 -m pip install -e '.[asr]'
+```
+
+Run `kahe.mp3` through Surt, then retrieve from the full Shabad OS export:
+
+```bash
+PYTHONPATH=src python3 -m khoji identify-audio \
+  --corpus data/shabados/sggs.jsonl \
+  --audio data/phase1/benchmark/audio/kahe.mp3 \
+  --asr-model surt-small-v3 \
+  --json
+```
+
+For line-position experiments, query a shorter window instead of the whole recording:
+
+```bash
+PYTHONPATH=src python3 -m khoji identify-audio \
+  --corpus data/shabados/sggs.jsonl \
+  --audio data/phase1/benchmark/audio/kahe.mp3 \
+  --asr-model surt-small-v3 \
+  --start-s 60 \
+  --duration-s 20
+```
+
+Run the HTML app with ASR enabled for uploads and mic chunks:
+
+```bash
+PYTHONPATH=src python3 -m khoji serve \
+  --corpus data/shabados/sggs.jsonl \
+  --manifest data/phase1/benchmark/manifest.jsonl \
+  --asr-model surt-small-v3
+```
+
+The response includes the raw ASR transcript under `asr.text`, then the usual `top_shabads`, `top_lines`, active line, context lines, and active-line-only translation. `ffmpeg` must be available on PATH because Khoji normalizes uploaded audio to 16 kHz mono WAV before transcription.
+
 ## Phase 2 Live Chunk MVP
 
 The same server also exposes live chunking:

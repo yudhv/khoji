@@ -5,8 +5,9 @@ import json
 import sys
 from pathlib import Path
 
+from .asr import DEFAULT_SURT_MODEL_ID, build_audio_transcriber, extract_audio_window
 from .corpus import CorpusError, load_shabads, validate_shabads
-from .phase1 import evaluate_benchmark, write_benchmark_report
+from .phase1 import DEFAULT_TRANSLATION_LANGUAGE, Phase1Identifier, evaluate_benchmark, write_benchmark_report
 from .retriever import KhojiIndex
 from .server import run_server
 from .shabados import (
@@ -47,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     serve_parser.add_argument("--manifest", type=Path, default=Path("data/phase1/benchmark/manifest.jsonl"))
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8765)
+    serve_parser.add_argument("--asr-model", choices=["none", "surt-small-v3"], default="none")
+    serve_parser.add_argument("--surt-model-id", default=DEFAULT_SURT_MODEL_ID)
+    serve_parser.add_argument("--asr-device")
+    serve_parser.add_argument("--asr-chunk-length-s", type=int, default=30)
 
     benchmark_parser = subparsers.add_parser("evaluate-benchmark")
     benchmark_parser.add_argument("--corpus", type=Path, default=Path("data/shabados/sggs.jsonl"))
@@ -75,6 +80,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     export_shabados_parser.add_argument("--limit", type=int)
 
+    identify_audio_parser = subparsers.add_parser("identify-audio")
+    identify_audio_parser.add_argument("--corpus", type=Path, default=Path("data/shabados/sggs.jsonl"))
+    identify_audio_parser.add_argument("--audio", type=Path, required=True)
+    identify_audio_parser.add_argument("--manifest", type=Path)
+    identify_audio_parser.add_argument("--translation-language", default=DEFAULT_TRANSLATION_LANGUAGE)
+    identify_audio_parser.add_argument("--asr-model", choices=["none", "surt-small-v3"], default="surt-small-v3")
+    identify_audio_parser.add_argument("--surt-model-id", default=DEFAULT_SURT_MODEL_ID)
+    identify_audio_parser.add_argument("--asr-device")
+    identify_audio_parser.add_argument("--asr-chunk-length-s", type=int, default=30)
+    identify_audio_parser.add_argument("--start-s", type=float)
+    identify_audio_parser.add_argument("--duration-s", type=float)
+    identify_audio_parser.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
 
     try:
@@ -85,11 +103,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "serve":
+            transcriber = build_audio_transcriber(
+                args.asr_model,
+                model_id=args.surt_model_id,
+                device=_parse_device(args.asr_device),
+                chunk_length_s=args.asr_chunk_length_s,
+            )
             run_server(
                 corpus_path=args.corpus,
                 manifest_path=args.manifest,
                 host=args.host,
                 port=args.port,
+                audio_transcriber=transcriber,
             )
             return 0
 
@@ -130,6 +155,34 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Exported {len(shabads)} shabads to {args.output}")
             return 0
 
+        if args.command == "identify-audio":
+            transcriber = build_audio_transcriber(
+                args.asr_model,
+                model_id=args.surt_model_id,
+                device=_parse_device(args.asr_device),
+                chunk_length_s=args.asr_chunk_length_s,
+            )
+            identifier = Phase1Identifier(
+                args.corpus,
+                args.manifest,
+                translation_language=args.translation_language,
+                audio_transcriber=transcriber,
+            )
+            audio_bytes = extract_audio_window(
+                args.audio.read_bytes(),
+                start_s=args.start_s,
+                duration_s=args.duration_s,
+            )
+            result = identifier.identify_audio(
+                audio_bytes,
+                translation_language=args.translation_language,
+            )
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                _print_audio_result(result)
+            return 0
+
         if args.command == "identify":
             query = _read_query(args.query, args.query_file)
             shabads = load_shabads(args.corpus)
@@ -145,12 +198,21 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 _print_result(result)
             return 0
-    except (CorpusError, ShabadOsError, KeyError, ValueError) as exc:
+    except (CorpusError, ShabadOsError, KeyError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     parser.print_help()
     return 1
+
+
+def _parse_device(device: str | None) -> str | int | None:
+    if device is None or device == "":
+        return None
+    try:
+        return int(device)
+    except ValueError:
+        return device
 
 
 def _read_query(query: str | None, query_file: Path | None) -> str:
@@ -189,6 +251,27 @@ def _print_result(result) -> None:
             f"score={candidate.score:.3f} confidence={candidate.confidence:.3f}"
         )
         print(f"   {text}")
+
+
+def _print_audio_result(result: dict) -> None:
+    if result.get("asr"):
+        print("ASR transcript:")
+        print(result["asr"]["text"])
+        print()
+
+    if result.get("status") != "identified":
+        print(f"Not confident yet: {result.get('unknown_reason')}")
+        return
+
+    shabad = result["shabad"]
+    ang = f", ang {shabad['ang']}" if shabad.get("ang") is not None else ""
+    print(f"Best shabad: {shabad['title']} ({shabad['shabad_id']}{ang})")
+    active = result["active_line"]
+    print(f"Active line: {active['order']} ({active['line_id']})")
+    print(active["text"])
+    if active.get("translation"):
+        print(active["translation"])
+    print(f"Confidence: {result['confidence']:.3f}")
 
 
 def _print_shabados_info(info) -> None:
