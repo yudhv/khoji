@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .asr import DEFAULT_SURT_MODEL_ID, build_audio_transcriber, extract_audio_window
 from .corpus import CorpusError, load_shabads, validate_shabads
+from .line_labels import build_line_label_template_rows, write_line_label_template
 from .phase1 import DEFAULT_TRANSLATION_LANGUAGE, Phase1Identifier, evaluate_benchmark, write_benchmark_report
 from .retriever import KhojiIndex
 from .server import run_server
@@ -92,6 +93,13 @@ def main(argv: list[str] | None = None) -> int:
     identify_audio_parser.add_argument("--start-s", type=float)
     identify_audio_parser.add_argument("--duration-s", type=float)
     identify_audio_parser.add_argument("--json", action="store_true")
+
+    line_label_template_parser = subparsers.add_parser("create-line-label-template")
+    line_label_template_parser.add_argument("--corpus", type=Path, default=Path("data/shabados/sggs.jsonl"))
+    line_label_template_parser.add_argument("--recording-id", required=True)
+    line_label_template_parser.add_argument("--shabad-id", required=True)
+    line_label_template_parser.add_argument("--audio-path", default="")
+    line_label_template_parser.add_argument("--output", type=Path)
 
     args = parser.parse_args(argv)
 
@@ -181,6 +189,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
             else:
                 _print_audio_result(result)
+            return 0
+
+        if args.command == "create-line-label-template":
+            shabads = load_shabads(args.corpus)
+            shabad = next(
+                (candidate for candidate in shabads if candidate.shabad_id == args.shabad_id),
+                None,
+            )
+            if shabad is None:
+                raise ValueError(f"Unknown shabad_id: {args.shabad_id}")
+            output = args.output or Path(
+                f"data/phase1/recordings/{args.recording_id}.line_labels.tsv"
+            )
+            rows = build_line_label_template_rows(
+                shabad,
+                recording_id=args.recording_id,
+                audio_path=args.audio_path,
+            )
+            write_line_label_template(rows, output)
+            print(f"Wrote {len(rows)} label rows to {output}")
             return 0
 
         if args.command == "identify":

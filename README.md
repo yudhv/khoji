@@ -119,6 +119,19 @@ PYTHONPATH=src python3 scripts/register_phase1_recording.py \
 
 That writes `data/phase1/recordings/manifest.jsonl` with shabad-level metadata, duration, and hash. Line-level training still needs a separate timestamp file before the recording can supervise current-line prediction.
 
+Create a fillable line timestamp template for a recording:
+
+```bash
+PYTHONPATH=src python3 -m khoji create-line-label-template \
+  --corpus data/shabados/sggs.jsonl \
+  --recording-id kahe_re_ban_full_001 \
+  --shabad-id SGGS:DSB \
+  --audio-path ../benchmark/audio/kahe.mp3
+```
+
+This writes `data/phase1/recordings/kahe_re_ban_full_001.line_labels.tsv`.
+See `docs/line_labeling.md` for the column guide.
+
 ### Surt ASR Baseline
 
 Khoji can also use `surindersinghssj/surt-small-v3` as an optional ASR fallback for audio that is not in the Phase 1 manifest. This keeps the benchmark path deterministic while allowing arbitrary vocal audio to be transcribed and queried against the complete Shabad OS corpus.
