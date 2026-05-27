@@ -193,6 +193,11 @@ PYTHONPATH=src python3 -m khoji serve \
 
 The response includes the raw ASR transcript under `asr.text`, then the usual `top_shabads`, `top_lines`, active line, context lines, and active-line-only translation. `ffmpeg` must be available on PATH because Khoji normalizes uploaded audio to 16 kHz mono WAV before transcription.
 
+To evaluate Surt windows against a manually labeled recording, use
+`scripts/evaluate_surt_alignment.py`. The first Kahe results and the current
+recommended 12-second/5-second rolling setup are recorded in
+`docs/surt_alignment.md`.
+
 ## Phase 2 Live Chunk MVP
 
 The same server also exposes live chunking:
