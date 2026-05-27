@@ -37,8 +37,11 @@ class ServerTests(unittest.TestCase):
                 self.assertIn("micButton", html)
                 self.assertIn("mediaPlayer", html)
                 self.assertIn("Add media", html)
+                self.assertIn("transcriptView", html)
+                self.assertIn("searchTranscript", html)
                 app_js = urlopen(f"{base_url}/app.js", timeout=5).read().decode("utf-8")
                 self.assertIn("mic-recording.webm", app_js)
+                self.assertIn("renderTranscript", app_js)
                 self.assertIn("start_s: start", app_js)
                 self.assertNotIn("live-window.webm", app_js)
 
@@ -67,6 +70,7 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(live_response["session_id"], "test-session")
                 self.assertEqual(live_response["live"]["status"], "accepted")
                 self.assertEqual(live_response["within_shabad_id"], "sample_shabad")
+                self.assertEqual(live_response["latest_query"], "kahe re ban khojan jai")
 
                 labeler_html = urlopen(f"{base_url}/labeler", timeout=5).read().decode("utf-8")
                 self.assertIn("labelAudio", labeler_html)

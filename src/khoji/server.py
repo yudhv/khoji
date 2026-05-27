@@ -195,6 +195,9 @@ def _make_handler(
                         translation_language=language,
                     )
                     result["session_id"] = session_id
+                    result["latest_query"] = raw_result.get("query", "")
+                    if raw_result.get("asr") is not None:
+                        result["latest_asr"] = raw_result["asr"]
                     self._send_json(result)
                     return
                 if parsed.path == "/api/identify-text":

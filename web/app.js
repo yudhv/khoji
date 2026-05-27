@@ -11,6 +11,9 @@ const unknownReason = document.getElementById("unknownReason");
 const shabadTitle = document.getElementById("shabadTitle");
 const shabadDetails = document.getElementById("shabadDetails");
 const lineStack = document.getElementById("lineStack");
+const transcriptView = document.getElementById("transcriptView");
+const searchTranscript = document.getElementById("searchTranscript");
+const searchTranscriptMeta = document.getElementById("searchTranscriptMeta");
 
 let recorder = null;
 let chunks = [];
@@ -114,6 +117,7 @@ function selectMediaFile(file) {
   emptyState.hidden = false;
   resultView.hidden = true;
   unknownView.hidden = true;
+  transcriptView.hidden = true;
   setStatus("Press play to classify media live");
 }
 
@@ -194,8 +198,9 @@ async function identifyLiveChunk(blob, filename, options = {}) {
 }
 
 function renderResult(result) {
+  renderTranscript(result);
   if (result.status !== "identified") {
-    renderUnknown(result.unknown_reason || "No confident match");
+    renderUnknown(result);
     return;
   }
 
@@ -229,11 +234,31 @@ function renderResult(result) {
   );
 }
 
-function renderUnknown(reason) {
+function renderUnknown(result) {
+  renderTranscript(result);
   emptyState.hidden = true;
   resultView.hidden = true;
   unknownView.hidden = false;
-  unknownReason.textContent = reason;
+  unknownReason.textContent = result.unknown_reason || "No confident match";
+}
+
+function renderTranscript(result) {
+  const latestAsr = result.latest_asr || result.asr;
+  const transcript = latestAsr?.text || result.latest_query || result.query || "";
+  if (!transcript.trim()) {
+    transcriptView.hidden = true;
+    searchTranscript.textContent = "";
+    searchTranscriptMeta.textContent = "";
+    return;
+  }
+
+  const elapsed = latestAsr?.metadata?.elapsed_ms;
+  transcriptView.hidden = false;
+  searchTranscript.textContent = transcript;
+  searchTranscriptMeta.textContent = [
+    latestAsr?.model ? `Model ${shortModelName(latestAsr.model)}` : "",
+    Number.isFinite(elapsed) ? `${elapsed} ms` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 function resetLiveSession() {
@@ -250,4 +275,8 @@ function setStatus(text) {
 function makeSessionId() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function shortModelName(model) {
+  return String(model).split("/").pop() || String(model);
 }
