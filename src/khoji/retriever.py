@@ -14,6 +14,12 @@ class _LineIndex:
     vectors: list[SparseVector]
 
 
+@dataclass(frozen=True)
+class _GlobalLineIndex:
+    lines: tuple[Line, ...]
+    documents: tuple[str, ...]
+
+
 class KhojiIndex:
     def __init__(self, shabads: list[Shabad]) -> None:
         if not shabads:
@@ -26,6 +32,7 @@ class KhojiIndex:
         self._shabad_vectors = self._shabad_vectorizer.fit_transform(shabad_documents)
 
         self._line_indexes: dict[str, _LineIndex] = {}
+        self._global_line_index: _GlobalLineIndex | None = None
 
     def search_shabads(self, query: str, top_k: int = 5) -> tuple[RankedShabad, ...]:
         query_vector = self._shabad_vectorizer.transform_one(query)
@@ -71,6 +78,33 @@ class KhojiIndex:
             for (line, score), confidence in zip(scored, confidences, strict=True)
         )
 
+    def search_all_lines(self, query: str, top_k: int = 20) -> tuple[RankedLine, ...]:
+        if not query.strip():
+            return ()
+        line_index = self._global_line_index
+        if line_index is None:
+            line_index = _build_global_line_index(self.shabads)
+            self._global_line_index = line_index
+
+        normalized_query = make_search_text(query)
+        query_tokens = frozenset(
+            token for token in normalized_query.split() if len(token) >= 2
+        )
+        scored = sorted(
+            (
+                (line, _line_search_score(normalized_query, query_tokens, document))
+                for line, document in zip(line_index.lines, line_index.documents, strict=True)
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        scored = [item for item in scored if item[1] > 0][:top_k]
+        confidences = _relative_confidences([score for _, score in scored])
+        return tuple(
+            RankedLine(line=line, score=score, confidence=confidence)
+            for (line, score), confidence in zip(scored, confidences, strict=True)
+        )
+
     def identify(
         self,
         query: str,
@@ -102,6 +136,18 @@ def _build_line_index(shabad: Shabad) -> _LineIndex:
     )
 
 
+def _build_global_line_index(shabads: list[Shabad]) -> _GlobalLineIndex:
+    lines = tuple(line for shabad in shabads for line in shabad.lines)
+    shabads_by_id = {shabad.shabad_id: shabad for shabad in shabads}
+    return _GlobalLineIndex(
+        lines=lines,
+        documents=tuple(
+            _global_line_document(shabads_by_id[line.shabad_id], line)
+            for line in lines
+        ),
+    )
+
+
 def _shabad_document(shabad: Shabad) -> str:
     return make_search_text(
         shabad.title,
@@ -119,6 +165,37 @@ def _line_document(line: Line) -> str:
         line.section,
         "rahao" if line.is_refrain else "",
     )
+
+
+def _global_line_document(shabad: Shabad, line: Line) -> str:
+    return make_search_text(
+        shabad.title,
+        shabad.raag,
+        shabad.author,
+        _line_document(line),
+        _line_translation_text(line),
+    )
+
+
+def _line_translation_text(line: Line) -> str:
+    translations = line.metadata.get("translations", [])
+    return " ".join(str(translation.get("text", "")) for translation in translations)
+
+
+def _line_search_score(
+    normalized_query: str,
+    query_tokens: frozenset[str],
+    document: str,
+) -> float:
+    if not normalized_query:
+        return 0.0
+    score = 0.0
+    if normalized_query in document:
+        score += 100.0 + len(normalized_query) / max(len(document), 1)
+    for token in query_tokens:
+        if token in document:
+            score += min(len(token), 12)
+    return score
 
 
 def _relative_confidences(scores: list[float]) -> list[float]:

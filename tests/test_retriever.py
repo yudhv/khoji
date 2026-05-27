@@ -69,6 +69,10 @@ class RetrieverTests(unittest.TestCase):
         )
         self.assertEqual(result.best_line.line.line_id, "tu_thakur_003")
 
+    def test_can_search_lines_across_full_corpus(self) -> None:
+        results = self.index.search_all_lines("tum maat pita ham baarik tere")
+        self.assertEqual(results[0].line.line_id, "tu_thakur_003")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import io
+import wave
 import tempfile
 import threading
 import unittest
@@ -76,6 +78,15 @@ class ServerTests(unittest.TestCase):
                 ).read()
                 self.assertEqual(audio_response, audio_path.read_bytes())
 
+                search = json.loads(
+                    urlopen(
+                        f"{base_url}/api/search-lines?q=sarab+nivasi&top_k=5",
+                        timeout=5,
+                    ).read().decode("utf-8")
+                )
+                self.assertEqual(search["results"][0]["line_id"], "sample_line_2")
+                self.assertEqual(search["results"][0]["shabad_id"], "sample_shabad")
+
                 first_label = _post_json(
                     f"{base_url}/api/label-line-click",
                     {"recording_id": "recording-1", "line_id": "sample_line_1", "time_s": 1.25},
@@ -101,6 +112,15 @@ class ServerTests(unittest.TestCase):
                     {"recording_id": "recording-1"},
                 )
                 self.assertEqual(reset["labels"], [])
+
+                upload_audio = _wav_bytes()
+                uploaded = _post_multipart_audio(
+                    f"{base_url}/api/recording-upload",
+                    upload_audio,
+                )
+                self.assertEqual(uploaded["recording"]["shabad_id"], "")
+                self.assertIsNone(uploaded["shabad"])
+                self.assertEqual(uploaded["labels"], [])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -179,6 +199,16 @@ def _write_manifest_fixture(directory: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     return manifest_path, audio_path
+
+
+def _wav_bytes() -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(b"\x00\x00" * 1600)
+    return buffer.getvalue()
 
 
 def _write_recording_manifest_fixture(directory: Path, audio_path: Path) -> Path:

@@ -18,6 +18,12 @@
       </header>
 
       <section class="labeler-media" aria-label="Recording controls">
+        <div class="upload-row">
+          <label class="file-button">
+            <input id="mediaFile" type="file" accept="audio/*,video/*" />
+            Add media
+          </label>
+        </div>
         <audio id="labelAudio" controls preload="metadata"></audio>
         <div class="labeler-toolbar">
           <div class="time-readout">
@@ -34,7 +40,7 @@
       <section class="labeler-workspace">
         <section class="line-picker" aria-label="Shabad lines">
           <div class="search-row">
-            <input id="lineSearch" type="search" placeholder="Search line" autocomplete="off" />
+            <input id="lineSearch" type="search" placeholder="Search all SGGS lines" autocomplete="off" />
           </div>
           <div id="lineList" class="label-line-list"></div>
         </section>

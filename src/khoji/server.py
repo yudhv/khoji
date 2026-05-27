@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime
 from email import policy
 from email.parser import BytesParser
 from http import HTTPStatus
@@ -20,7 +22,7 @@ from .line_labels import (
 )
 from .phase1 import DEFAULT_TRANSLATION_LANGUAGE, Phase1Identifier
 from .phase2 import SequenceSmoother
-from .recordings import RecordingLabel, load_recording_manifest
+from .recordings import RecordingLabel, load_recording_manifest, register_recording
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +104,18 @@ def _make_handler(
                     )
                 )
                 return
+            if parsed.path == "/api/search-lines":
+                query = parse_qs(parsed.query)
+                search_query = (query.get("q") or [""])[0]
+                top_k = _parse_top_k((query.get("top_k") or ["20"])[0], default=20)
+                self._send_json(
+                    _search_lines(
+                        identifier,
+                        query=search_query,
+                        top_k=top_k,
+                    )
+                )
+                return
             if parsed.path == "/api/recording-audio":
                 query = parse_qs(parsed.query)
                 recording_id = (query.get("recording_id") or [""])[0]
@@ -133,6 +147,21 @@ def _make_handler(
                     result = identifier.identify_audio(
                         audio_bytes,
                         translation_language=language,
+                    )
+                    self._send_json(result)
+                    return
+                if parsed.path == "/api/recording-upload":
+                    body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                    audio_bytes, fields = _extract_audio_request(
+                        body,
+                        self.headers.get("Content-Type", ""),
+                    )
+                    result = _recording_upload(
+                        identifier,
+                        recording_manifest_path,
+                        audio_bytes=audio_bytes,
+                        filename=fields.get("_audio_filename", "recording"),
+                        recording_id=fields.get("recording_id", ""),
                     )
                     self._send_json(result)
                     return
@@ -204,7 +233,7 @@ def _make_handler(
                     )
                     self._send_json(result)
                     return
-            except (KhojiServerError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            except (KhojiServerError, KeyError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._send_error(HTTPStatus.NOT_FOUND, "Not found")
@@ -267,8 +296,9 @@ def _labeler_state(
     recording_id: str = "",
 ) -> dict[str, Any]:
     recording = _recording_by_id(recording_manifest_path, recording_id)
-    shabad = identifier.shabad_by_id(recording.shabad_id)
     label_path = _recording_label_path(recording_manifest_path, recording)
+    labels = label_segments(load_line_label_rows(label_path))
+    shabad = _active_labeler_shabad(identifier, recording, labels)
     return {
         "ok": True,
         "recording": {
@@ -279,16 +309,39 @@ def _labeler_state(
             "label_path": str(label_path),
             "audio_url": f"/api/recording-audio?recording_id={recording.recording_id}",
         },
-        "shabad": {
-            "shabad_id": shabad.shabad_id,
-            "title": shabad.title,
-            "ang": shabad.ang,
-            "raag": shabad.raag,
-            "author": shabad.author,
-            "lines": [_label_line_payload(line) for line in shabad.lines],
-        },
-        "labels": label_segments(load_line_label_rows(label_path)),
+        "shabad": _label_shabad_payload(shabad) if shabad is not None else None,
+        "labels": labels,
     }
+
+
+def _recording_upload(
+    identifier: Phase1Identifier,
+    recording_manifest_path: Path,
+    *,
+    audio_bytes: bytes,
+    filename: str,
+    recording_id: str = "",
+) -> dict[str, Any]:
+    if not audio_bytes:
+        raise KhojiServerError("Uploaded media is empty")
+    recording_id = recording_id or _recording_id_from_filename(filename)
+    suffix = _safe_suffix(filename)
+    audio_dir = recording_manifest_path.parent / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / f"{recording_id}{suffix}"
+    audio_path.write_bytes(audio_bytes)
+    register_recording(
+        audio_path=audio_path,
+        manifest_path=recording_manifest_path,
+        recording_id=recording_id,
+        shabad_id="",
+        kind="kirtan",
+        split="dev",
+        has_vocals=True,
+        source="local_upload",
+        notes=f"Uploaded from Khoji labeler as {filename}",
+    )
+    return _labeler_state(identifier, recording_manifest_path, recording_id=recording_id)
 
 
 def _label_line_click(
@@ -300,7 +353,7 @@ def _label_line_click(
     time_s: float,
 ) -> dict[str, Any]:
     recording = _recording_by_id(recording_manifest_path, recording_id)
-    shabad = identifier.shabad_by_id(recording.shabad_id)
+    shabad = identifier.shabad_for_line_id(line_id)
     label_path = _recording_label_path(recording_manifest_path, recording)
     rows = apply_line_click(
         load_line_label_rows(label_path),
@@ -312,6 +365,24 @@ def _label_line_click(
     )
     write_line_label_rows(rows, label_path)
     return _labeler_state(identifier, recording_manifest_path, recording_id=recording_id)
+
+
+def _search_lines(
+    identifier: Phase1Identifier,
+    *,
+    query: str,
+    top_k: int,
+) -> dict[str, Any]:
+    results = identifier.search_all_lines(query, top_k=top_k)
+    return {
+        "ok": True,
+        "query": query,
+        "results": [
+            _label_search_result_payload(identifier, candidate)
+            for candidate in results
+            if candidate.score > 0
+        ],
+    }
 
 
 def _label_finish(
@@ -377,6 +448,31 @@ def _recording_label_path(
     return (recording_manifest_path.parent / f"{recording.recording_id}.line_labels.tsv").resolve()
 
 
+def _active_labeler_shabad(
+    identifier: Phase1Identifier,
+    recording: RecordingLabel,
+    labels: list[dict[str, Any]],
+):
+    if labels:
+        shabad_id = str(labels[-1].get("shabad_id", ""))
+        if shabad_id:
+            return identifier.shabad_by_id(shabad_id)
+    if recording.shabad_id:
+        return identifier.shabad_by_id(recording.shabad_id)
+    return None
+
+
+def _label_shabad_payload(shabad) -> dict[str, Any]:
+    return {
+        "shabad_id": shabad.shabad_id,
+        "title": shabad.title,
+        "ang": shabad.ang,
+        "raag": shabad.raag,
+        "author": shabad.author,
+        "lines": [_label_line_payload(line) for line in shabad.lines],
+    }
+
+
 def _label_line_payload(line) -> dict[str, Any]:
     return {
         "line_id": line.line_id,
@@ -391,6 +487,21 @@ def _label_line_payload(line) -> dict[str, Any]:
     }
 
 
+def _label_search_result_payload(identifier: Phase1Identifier, candidate) -> dict[str, Any]:
+    shabad = identifier.shabad_by_id(candidate.line.shabad_id)
+    payload = _label_line_payload(candidate.line)
+    return {
+        **payload,
+        "score": candidate.score,
+        "confidence": candidate.confidence,
+        "shabad_id": shabad.shabad_id,
+        "shabad_title": shabad.title,
+        "ang": shabad.ang,
+        "raag": shabad.raag,
+        "author": shabad.author,
+    }
+
+
 def _translation_for_line(line, language: str) -> str:
     for translation in line.metadata.get("translations", []):
         if translation.get("language") == language:
@@ -398,6 +509,27 @@ def _translation_for_line(line, language: str) -> str:
     if language == "English":
         return line.english
     return ""
+
+
+def _parse_top_k(raw: str, *, default: int) -> int:
+    try:
+        return max(1, min(int(raw), 50))
+    except ValueError:
+        return default
+
+
+def _recording_id_from_filename(filename: str) -> str:
+    stem = Path(filename).stem or "recording"
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", stem).strip("_").lower() or "recording"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{slug}_{timestamp}"
+
+
+def _safe_suffix(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    if re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
+        return suffix
+    return ".bin"
 
 
 def _extract_audio_request(body: bytes, content_type: str) -> tuple[bytes, dict[str, str]]:
@@ -421,6 +553,8 @@ def _extract_audio_request(body: bytes, content_type: str) -> tuple[bytes, dict[
         payload = part.get_payload(decode=True) or b""
         if name == "audio":
             audio_bytes = payload
+            if params.get("filename"):
+                fields["_audio_filename"] = str(params["filename"])
         else:
             fields[name] = payload.decode(part.get_content_charset() or "utf-8")
     if audio_bytes is None:

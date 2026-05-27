@@ -237,6 +237,11 @@ select {
   border-bottom: 1px solid var(--line);
 }
 
+.upload-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .labeler-media audio {
   width: 100%;
 }

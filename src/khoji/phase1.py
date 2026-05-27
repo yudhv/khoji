@@ -70,6 +70,9 @@ class Phase1Identifier:
         self.shabads = load_shabads(self.corpus_path)
         self.index = KhojiIndex(self.shabads)
         self._shabads_by_id = {shabad.shabad_id: shabad for shabad in self.shabads}
+        self._lines_by_id = {
+            line.line_id: line for shabad in self.shabads for line in shabad.lines
+        }
         self.clips = load_benchmark_manifest(manifest_path) if manifest_path else []
         self._clips_by_sha = {clip.sha256: clip for clip in self.clips if clip.sha256}
 
@@ -78,6 +81,19 @@ class Phase1Identifier:
             return self._shabads_by_id[shabad_id]
         except KeyError as exc:
             raise KeyError(f"Unknown shabad_id: {shabad_id}") from exc
+
+    def line_by_id(self, line_id: str) -> Line:
+        try:
+            return self._lines_by_id[line_id]
+        except KeyError as exc:
+            raise KeyError(f"Unknown line_id: {line_id}") from exc
+
+    def shabad_for_line_id(self, line_id: str) -> Shabad:
+        line = self.line_by_id(line_id)
+        return self.shabad_by_id(line.shabad_id)
+
+    def search_all_lines(self, query: str, *, top_k: int = 20) -> tuple[RankedLine, ...]:
+        return self.index.search_all_lines(query, top_k=top_k)
 
     def identify_audio(
         self,

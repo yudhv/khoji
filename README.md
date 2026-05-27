@@ -145,6 +145,12 @@ Play the recording and click the current shabad line. Each click closes the
 previous segment and starts the selected line at the current audio time. `Finish`
 closes the final segment; `Reset` clears the generated TSV.
 
+The labeler can also upload a new local media file with `Add media`. Uploaded
+recordings are saved under ignored local data and added to the recording
+manifest automatically. The search box queries the full Shabad OS SGGS corpus;
+after you click a search result, the picker switches to that full shabad so
+nearby lines can be labeled without another search.
+
 ### Surt ASR Baseline
 
 Khoji can also use `surindersinghssj/surt-small-v3` as an optional ASR fallback for audio that is not in the Phase 1 manifest. This keeps the benchmark path deterministic while allowing arbitrary vocal audio to be transcribed and queried against the complete Shabad OS corpus.
