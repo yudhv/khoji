@@ -87,6 +87,14 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(search["results"][0]["line_id"], "sample_line_2")
                 self.assertEqual(search["results"][0]["shabad_id"], "sample_shabad")
 
+                first_letter_search = json.loads(
+                    urlopen(
+                        f"{base_url}/api/search-lines?q=krbkj&top_k=5",
+                        timeout=5,
+                    ).read().decode("utf-8")
+                )
+                self.assertEqual(first_letter_search["results"][0]["line_id"], "sample_line_1")
+
                 first_label = _post_json(
                     f"{base_url}/api/label-line-click",
                     {"recording_id": "recording-1", "line_id": "sample_line_1", "time_s": 1.25},

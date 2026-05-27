@@ -73,6 +73,21 @@ class RetrieverTests(unittest.TestCase):
         results = self.index.search_all_lines("tum maat pita ham baarik tere")
         self.assertEqual(results[0].line.line_id, "tu_thakur_003")
 
+    def test_can_search_lines_by_first_letters(self) -> None:
+        results = self.index.search_all_lines("krbkj")
+        self.assertEqual(results[0].line.line_id, "kahe_re_ban_001")
+
+    def test_can_search_lines_by_first_letter_prefix_after_three_letters(self) -> None:
+        results = self.index.search_all_lines("krb")
+        self.assertEqual(results[0].line.line_id, "kahe_re_ban_001")
+
+    def test_can_search_lines_by_first_letters_after_short_prefix(self) -> None:
+        results = self.index.search_all_lines("ssnhjslv")
+        self.assertEqual(results[0].line.line_id, "japji_001_006")
+
+    def test_global_line_search_waits_for_three_characters(self) -> None:
+        self.assertEqual(self.index.search_all_lines("kr"), ())
+
 
 if __name__ == "__main__":
     unittest.main()

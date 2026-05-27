@@ -28,6 +28,13 @@ lineSearch.addEventListener("input", () => {
     setStatus("Ready");
     return;
   }
+  if (compactQueryLength(query) < 3) {
+    searchResults = [];
+    searchLoading = false;
+    renderLines();
+    setStatus("Type at least 3 characters");
+    return;
+  }
   searchLoading = true;
   renderLines();
   setStatus("Searching SGGS...");
@@ -88,6 +95,14 @@ function renderLines() {
   const usingSearch = Boolean(query);
   const lines = usingSearch ? searchResults : (state.shabad?.lines || []);
 
+  if (usingSearch && compactQueryLength(query) < 3) {
+    const hint = document.createElement("p");
+    hint.className = "segment-empty";
+    hint.textContent = "Type at least 3 characters";
+    lineList.replaceChildren(hint);
+    return;
+  }
+
   if (usingSearch && searchLoading) {
     const loading = document.createElement("p");
     loading.className = "segment-empty";
@@ -139,6 +154,10 @@ function renderLines() {
     button.append(order, text, subtext);
     return button;
   }));
+}
+
+function compactQueryLength(value) {
+  return value.replace(/\s+/g, "").length;
 }
 
 async function searchCanonicalLines() {
