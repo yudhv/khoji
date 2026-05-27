@@ -100,6 +100,7 @@ class Phase1Identifier:
         audio_bytes: bytes,
         *,
         translation_language: str | None = None,
+        within_shabad_id: str | None = None,
     ) -> dict[str, Any]:
         digest = sha256_bytes(audio_bytes)
         clip = self._clips_by_sha.get(digest)
@@ -113,6 +114,7 @@ class Phase1Identifier:
                 audio_bytes,
                 digest,
                 translation_language=translation_language,
+                within_shabad_id=within_shabad_id,
             )
         if not clip.transcript:
             return _unknown_response(
@@ -123,6 +125,7 @@ class Phase1Identifier:
         response = self.identify_text(
             clip.transcript,
             translation_language=translation_language,
+            within_shabad_id=within_shabad_id,
         )
         response["model_votes"].insert(
             0,
@@ -148,6 +151,7 @@ class Phase1Identifier:
         digest: str,
         *,
         translation_language: str | None = None,
+        within_shabad_id: str | None = None,
     ) -> dict[str, Any]:
         assert self.audio_transcriber is not None
         transcription = self.audio_transcriber.transcribe_bytes(audio_bytes)
@@ -157,6 +161,7 @@ class Phase1Identifier:
         response = self.identify_text(
             transcription.text,
             translation_language=translation_language,
+            within_shabad_id=within_shabad_id,
         )
         response["model_votes"].insert(
             0,
@@ -181,16 +186,39 @@ class Phase1Identifier:
         query: str,
         *,
         translation_language: str | None = None,
+        within_shabad_id: str | None = None,
     ) -> dict[str, Any]:
         language = translation_language or self.translation_language
-        result = self.index.identify(query, top_k_shabads=5, top_k_lines=5)
-        if result.best_shabad is None or result.best_line is None:
+        top_shabads = self.index.search_shabads(query, top_k=5)
+        if within_shabad_id:
+            shabad = self.shabad_by_id(within_shabad_id)
+            top_lines = self.index.search_lines(query, within_shabad_id, top_k=5)
+            if not top_lines:
+                return _unknown_response("no line candidate found in locked shabad")
+            active_line = top_lines[0].line
+            confidence = top_lines[0].confidence
+            best_shabad_score = top_shabads[0].score if top_shabads else 0.0
+            best_line_score = top_lines[0].score
+            vote_detail = "ranked lines inside the locked shabad"
+        else:
+            result = self.index.identify(query, top_k_shabads=5, top_k_lines=5)
+            if result.best_shabad is None or result.best_line is None:
+                return _unknown_response("no shabad or line candidate found")
+            shabad = result.best_shabad.shabad
+            active_line = result.best_line.line
+            confidence = min(result.best_shabad.confidence, result.best_line.confidence)
+            top_shabads = result.top_shabads
+            top_lines = result.top_lines
+            best_shabad_score = result.best_shabad.score
+            best_line_score = result.best_line.score
+            vote_detail = "ranked shabad first, then ranked lines within the top shabad"
+
+        if not top_shabads or not top_lines:
             return _unknown_response("no shabad or line candidate found")
 
-        shabad = result.best_shabad.shabad
-        active_line = result.best_line.line
-        confidence = min(result.best_shabad.confidence, result.best_line.confidence)
-        if result.best_shabad.score <= 0 or result.best_line.score <= 0:
+        if best_shabad_score <= 0 and not within_shabad_id:
+            return _unknown_response("retrieval confidence is zero")
+        if best_line_score <= 0:
             return _unknown_response("retrieval confidence is zero")
 
         context_lines = _context_lines(
@@ -208,16 +236,17 @@ class Phase1Identifier:
             "active_line": active_context_line,
             "context_lines": context_lines,
             "confidence": confidence,
-            "top_shabads": [_ranked_shabad_payload(candidate) for candidate in result.top_shabads],
-            "top_lines": [_ranked_line_payload(candidate) for candidate in result.top_lines],
+            "top_shabads": [_ranked_shabad_payload(candidate) for candidate in top_shabads],
+            "top_lines": [_ranked_line_payload(candidate) for candidate in top_lines],
             "model_votes": [
                 {
                     "model": "khoji_text_retrieval",
                     "confidence": confidence,
-                    "detail": "ranked shabad first, then ranked lines within the top shabad",
+                    "detail": vote_detail,
                 }
             ],
             "unknown_reason": None,
+            "within_shabad_id": within_shabad_id,
         }
 
     def response_for_line(

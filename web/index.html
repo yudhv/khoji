@@ -11,7 +11,7 @@
       <section class="reader" aria-live="polite">
         <div id="emptyState" class="empty-state">
           <h1>Khoji</h1>
-          <p>Record or upload a Phase 1 benchmark clip.</p>
+          <p>Record live or add media to classify the current shabad line.</p>
           <p><a class="plain-link" href="/labeler">Open labeler</a></p>
         </div>
 
@@ -32,18 +32,21 @@
       <section class="controls" aria-label="Audio controls">
         <div class="control-row">
           <label class="file-button">
-            <input id="audioFile" type="file" accept="audio/*" />
-            Upload clip
+            <input id="audioFile" type="file" accept="audio/*,video/*" />
+            Add media
           </label>
           <select id="translationLanguage" aria-label="Translation language">
             <option value="Punjabi" selected>Punjabi</option>
             <option value="English">English</option>
           </select>
         </div>
-        <button id="micButton" class="mic-button" type="button" aria-pressed="false">
-          <span id="micIcon">●</span>
-          <span id="micLabel">Record</span>
-        </button>
+        <div class="live-control-row">
+          <audio id="mediaPlayer" class="media-player" controls hidden></audio>
+          <button id="micButton" class="mic-button" type="button" aria-pressed="false">
+            <span id="micIcon">●</span>
+            <span id="micLabel">Record</span>
+          </button>
+        </div>
         <p id="statusText" class="status-text">Ready</p>
       </section>
     </main>

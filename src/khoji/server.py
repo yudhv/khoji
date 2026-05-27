@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .asr import AudioTranscriber
+from .asr import AudioTranscriber, extract_audio_window
 from .line_labels import (
     apply_line_click,
     finish_open_segment,
@@ -143,10 +143,12 @@ def _make_handler(
                         body,
                         self.headers.get("Content-Type", ""),
                     )
+                    audio_bytes = _requested_audio_window(audio_bytes, fields)
                     language = fields.get("translation_language", DEFAULT_TRANSLATION_LANGUAGE)
                     result = identifier.identify_audio(
                         audio_bytes,
                         translation_language=language,
+                        within_shabad_id=_within_shabad_id(fields),
                     )
                     self._send_json(result)
                     return
@@ -171,6 +173,7 @@ def _make_handler(
                         body,
                         self.headers.get("Content-Type", ""),
                     )
+                    audio_bytes = _requested_audio_window(audio_bytes, fields)
                     query = parse_qs(parsed.query)
                     session_id = (
                         fields.get("session_id")
@@ -181,6 +184,7 @@ def _make_handler(
                     raw_result = identifier.identify_audio(
                         audio_bytes,
                         translation_language=language,
+                        within_shabad_id=_within_shabad_id(fields),
                     )
                     smoother = live_sessions.setdefault(
                         session_id,
@@ -516,6 +520,25 @@ def _parse_top_k(raw: str, *, default: int) -> int:
         return max(1, min(int(raw), 50))
     except ValueError:
         return default
+
+
+def _requested_audio_window(audio_bytes: bytes, fields: dict[str, str]) -> bytes:
+    start_s = _optional_float(fields.get("start_s"))
+    duration_s = _optional_float(fields.get("duration_s"))
+    if start_s is None and duration_s is None:
+        return audio_bytes
+    return extract_audio_window(audio_bytes, start_s=start_s, duration_s=duration_s)
+
+
+def _within_shabad_id(fields: dict[str, str]) -> str | None:
+    shabad_id = fields.get("within_shabad_id") or fields.get("shabad_id") or ""
+    return shabad_id or None
+
+
+def _optional_float(raw: str | None) -> float | None:
+    if raw is None or raw == "":
+        return None
+    return float(raw)
 
 
 def _recording_id_from_filename(filename: str) -> str:

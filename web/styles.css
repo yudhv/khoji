@@ -127,6 +127,19 @@ body {
   flex-wrap: wrap;
 }
 
+.live-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: min(720px, 100%);
+}
+
+.media-player {
+  width: min(520px, calc(100vw - 150px));
+  min-width: 220px;
+}
+
 .file-button,
 select {
   min-height: 38px;
@@ -184,6 +197,15 @@ select {
 
   .line-row {
     padding-inline: 10px;
+  }
+
+  .live-control-row {
+    gap: 10px;
+  }
+
+  .media-player {
+    width: calc(100vw - 128px);
+    min-width: 0;
   }
 }
 

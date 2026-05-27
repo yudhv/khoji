@@ -1,4 +1,5 @@
 const audioFile = document.getElementById("audioFile");
+const mediaPlayer = document.getElementById("mediaPlayer");
 const micButton = document.getElementById("micButton");
 const micLabel = document.getElementById("micLabel");
 const statusText = document.getElementById("statusText");
@@ -14,13 +15,41 @@ const lineStack = document.getElementById("lineStack");
 let recorder = null;
 let chunks = [];
 let sessionId = makeSessionId();
+let selectedMediaFile = null;
+let selectedMediaUrl = "";
+let mediaTimer = null;
+let lastMediaSentAt = 0;
+let liveRequestInFlight = false;
+let lockedShabadId = "";
+
 const CHUNK_MS = 2000;
 const ROLLING_CHUNKS = 5;
+const MIN_ROLLING_CHUNKS = 4;
+const MEDIA_WINDOW_S = 12;
+const MEDIA_HOP_S = 5;
+const MIN_MEDIA_WINDOW_S = 8;
 
-audioFile.addEventListener("change", async () => {
+audioFile.addEventListener("change", () => {
   const file = audioFile.files?.[0];
   if (!file) return;
-  await identifyAudio(file);
+  selectMediaFile(file);
+});
+
+mediaPlayer.addEventListener("play", () => {
+  startMediaClassification();
+});
+
+mediaPlayer.addEventListener("pause", () => {
+  stopMediaClassification("Paused");
+});
+
+mediaPlayer.addEventListener("ended", () => {
+  stopMediaClassification("Finished");
+});
+
+translationLanguage.addEventListener("change", () => {
+  lockedShabadId = "";
+  setStatus("Translation changed");
 });
 
 micButton.addEventListener("click", async () => {
@@ -29,17 +58,24 @@ micButton.addEventListener("click", async () => {
     return;
   }
 
+  stopMediaClassification("Media classification paused");
+  resetLiveSession();
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     chunks = [];
-    sessionId = makeSessionId();
     recorder = new MediaRecorder(stream);
     recorder.addEventListener("dataavailable", async (event) => {
-      if (event.data.size === 0) return;
+      if (event.data.size === 0 || liveRequestInFlight) return;
       chunks.push(event.data);
       chunks = chunks.slice(-ROLLING_CHUNKS);
+      if (chunks.length < MIN_ROLLING_CHUNKS) {
+        setStatus(`Collecting ${MIN_ROLLING_CHUNKS * (CHUNK_MS / 1000)}s audio...`);
+        return;
+      }
       const windowBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-      await identifyLiveChunk(windowBlob);
+      await identifyLiveChunk(windowBlob, "live-window.webm", {
+        statusPrefix: "Mic",
+      });
     });
     recorder.addEventListener("stop", async () => {
       stream.getTracks().forEach((track) => track.stop());
@@ -58,32 +94,71 @@ micButton.addEventListener("click", async () => {
   }
 });
 
-async function identifyAudio(blob) {
-  setStatus("Identifying...");
-  const form = new FormData();
-  form.append("audio", blob, "clip.webm");
-  form.append("translation_language", translationLanguage.value);
-
-  try {
-    const response = await fetch("/api/identify-audio", {
-      method: "POST",
-      body: form,
-    });
-    const result = await response.json();
-    if (!response.ok || result.error) {
-      throw new Error(result.error || "Request failed");
-    }
-    renderResult(result);
-  } catch (error) {
-    renderUnknown(error.message);
-  }
+function selectMediaFile(file) {
+  selectedMediaFile = file;
+  resetLiveSession();
+  stopMediaClassification("Ready");
+  if (selectedMediaUrl) URL.revokeObjectURL(selectedMediaUrl);
+  selectedMediaUrl = URL.createObjectURL(file);
+  mediaPlayer.src = selectedMediaUrl;
+  mediaPlayer.hidden = false;
+  emptyState.hidden = false;
+  resultView.hidden = true;
+  unknownView.hidden = true;
+  setStatus("Press play to classify media live");
 }
 
-async function identifyLiveChunk(blob) {
+function startMediaClassification() {
+  if (!selectedMediaFile) return;
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+  }
+  resetLiveSession();
+  lastMediaSentAt = 0;
+  setStatus("Listening to media...");
+  classifyMediaWindow(true);
+  mediaTimer = window.setInterval(() => classifyMediaWindow(false), 1000);
+}
+
+function stopMediaClassification(status) {
+  if (mediaTimer) {
+    window.clearInterval(mediaTimer);
+    mediaTimer = null;
+  }
+  if (status) setStatus(status);
+}
+
+async function classifyMediaWindow(force) {
+  if (!selectedMediaFile || mediaPlayer.paused || mediaPlayer.ended) return;
+  if (liveRequestInFlight) return;
+
+  const currentTime = mediaPlayer.currentTime || 0;
+  if (currentTime < MIN_MEDIA_WINDOW_S) {
+    setStatus(`Collecting ${Math.ceil(MIN_MEDIA_WINDOW_S - currentTime)}s more audio...`);
+    return;
+  }
+  if (!force && currentTime - lastMediaSentAt < MEDIA_HOP_S) return;
+
+  const duration = Math.min(MEDIA_WINDOW_S, currentTime);
+  const start = Math.max(0, currentTime - duration);
+  lastMediaSentAt = currentTime;
+  await identifyLiveChunk(selectedMediaFile, selectedMediaFile.name || "media", {
+    start_s: start,
+    duration_s: duration,
+    statusPrefix: "Media",
+  });
+}
+
+async function identifyLiveChunk(blob, filename, options = {}) {
+  liveRequestInFlight = true;
+  setStatus(`${options.statusPrefix || "Live"} identifying...`);
   const form = new FormData();
-  form.append("audio", blob, "live-window.webm");
+  form.append("audio", blob, filename);
   form.append("translation_language", translationLanguage.value);
   form.append("session_id", sessionId);
+  if (lockedShabadId) form.append("within_shabad_id", lockedShabadId);
+  if (options.start_s !== undefined) form.append("start_s", String(options.start_s));
+  if (options.duration_s !== undefined) form.append("duration_s", String(options.duration_s));
 
   try {
     const response = await fetch("/api/live-chunk", {
@@ -100,10 +175,12 @@ async function identifyLiveChunk(blob) {
     } else if (result.live?.status === "unknown") {
       setStatus("Listening...");
     } else {
-      setStatus("Live");
+      setStatus(options.statusPrefix ? `${options.statusPrefix} live` : "Live");
     }
   } catch (error) {
     setStatus(`Live chunk failed: ${error.message}`);
+  } finally {
+    liveRequestInFlight = false;
   }
 }
 
@@ -113,6 +190,7 @@ function renderResult(result) {
     return;
   }
 
+  lockedShabadId = result.shabad.shabad_id || lockedShabadId;
   emptyState.hidden = true;
   unknownView.hidden = true;
   resultView.hidden = false;
@@ -140,7 +218,6 @@ function renderResult(result) {
       return row;
     })
   );
-  setStatus("Identified");
 }
 
 function renderUnknown(reason) {
@@ -148,7 +225,13 @@ function renderUnknown(reason) {
   resultView.hidden = true;
   unknownView.hidden = false;
   unknownReason.textContent = reason;
-  setStatus("Not confident yet");
+}
+
+function resetLiveSession() {
+  sessionId = makeSessionId();
+  chunks = [];
+  lockedShabadId = "";
+  liveRequestInFlight = false;
 }
 
 function setStatus(text) {

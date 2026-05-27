@@ -35,6 +35,8 @@ class ServerTests(unittest.TestCase):
                 base_url = f"http://127.0.0.1:{server.server_port}"
                 html = urlopen(f"{base_url}/", timeout=5).read().decode("utf-8")
                 self.assertIn("micButton", html)
+                self.assertIn("mediaPlayer", html)
+                self.assertIn("Add media", html)
 
                 response = _post_multipart_audio(
                     f"{base_url}/api/identify-audio",
@@ -55,10 +57,12 @@ class ServerTests(unittest.TestCase):
                     f"{base_url}/api/live-chunk",
                     audio_path.read_bytes(),
                     session_id="test-session",
+                    fields={"within_shabad_id": "sample_shabad"},
                 )
                 self.assertEqual(live_response["status"], "identified")
                 self.assertEqual(live_response["session_id"], "test-session")
                 self.assertEqual(live_response["live"]["status"], "accepted")
+                self.assertEqual(live_response["within_shabad_id"], "sample_shabad")
 
                 labeler_html = urlopen(f"{base_url}/labeler", timeout=5).read().decode("utf-8")
                 self.assertIn("labelAudio", labeler_html)
@@ -140,6 +144,7 @@ def _post_multipart_audio(
     audio_bytes: bytes,
     *,
     session_id: str | None = None,
+    fields: dict[str, str] | None = None,
 ) -> dict:
     boundary = "----KhojiBoundary"
     parts = [
@@ -153,6 +158,15 @@ def _post_multipart_audio(
                 f"--{boundary}\r\n".encode("utf-8"),
                 b'Content-Disposition: form-data; name="session_id"\r\n\r\n',
                 session_id.encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    for name, value in (fields or {}).items():
+        parts.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                value.encode("utf-8"),
                 b"\r\n",
             ]
         )

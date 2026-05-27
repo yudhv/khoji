@@ -64,6 +64,33 @@ class Phase1IdentifierTests(unittest.TestCase):
             self.assertEqual(result["asr"]["model"], "fake-asr")
             self.assertEqual(result["active_line"]["line_id"], "kahe_re_ban_001")
 
+    def test_asr_can_lock_line_search_to_known_shabad(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = _write_corpus_fixture(root)
+            manifest_path, _ = _write_manifest_fixture(root)
+            identifier = Phase1Identifier(
+                corpus_path,
+                manifest_path,
+                audio_transcriber=_FakeTranscriber("sarab nivasi sada alepa"),
+            )
+
+            result = identifier.identify_audio(
+                b"new audio bytes",
+                within_shabad_id="sample_kahe_re_ban",
+            )
+
+            self.assertEqual(result["status"], "identified")
+            self.assertEqual(result["shabad"]["shabad_id"], "sample_kahe_re_ban")
+            self.assertEqual(result["active_line"]["line_id"], "kahe_re_ban_002")
+            self.assertEqual(result["within_shabad_id"], "sample_kahe_re_ban")
+            self.assertTrue(
+                any(
+                    "locked shabad" in vote["detail"]
+                    for vote in result["model_votes"]
+                )
+            )
+
     def test_evaluates_benchmark_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
