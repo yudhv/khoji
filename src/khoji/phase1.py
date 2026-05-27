@@ -73,6 +73,12 @@ class Phase1Identifier:
         self.clips = load_benchmark_manifest(manifest_path) if manifest_path else []
         self._clips_by_sha = {clip.sha256: clip for clip in self.clips if clip.sha256}
 
+    def shabad_by_id(self, shabad_id: str) -> Shabad:
+        try:
+            return self._shabads_by_id[shabad_id]
+        except KeyError as exc:
+            raise KeyError(f"Unknown shabad_id: {shabad_id}") from exc
+
     def identify_audio(
         self,
         audio_bytes: bytes,

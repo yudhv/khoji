@@ -10,12 +10,22 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .asr import AudioTranscriber
+from .line_labels import (
+    apply_line_click,
+    finish_open_segment,
+    label_segments,
+    load_line_label_rows,
+    reset_label_rows,
+    write_line_label_rows,
+)
 from .phase1 import DEFAULT_TRANSLATION_LANGUAGE, Phase1Identifier
 from .phase2 import SequenceSmoother
+from .recordings import RecordingLabel, load_recording_manifest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STATIC_DIR = REPO_ROOT / "web"
+DEFAULT_RECORDING_MANIFEST = REPO_ROOT / "data/phase1/recordings/manifest.jsonl"
 
 
 class KhojiServerError(ValueError):
@@ -30,6 +40,7 @@ def run_server(
     port: int = 8765,
     static_dir: str | Path = DEFAULT_STATIC_DIR,
     audio_transcriber: AudioTranscriber | None = None,
+    recording_manifest_path: str | Path = DEFAULT_RECORDING_MANIFEST,
 ) -> None:
     server = create_server(
         corpus_path=corpus_path,
@@ -38,6 +49,7 @@ def run_server(
         port=port,
         static_dir=static_dir,
         audio_transcriber=audio_transcriber,
+        recording_manifest_path=recording_manifest_path,
     )
     print(f"Khoji server listening on http://{host}:{port}")
     server.serve_forever()
@@ -51,17 +63,22 @@ def create_server(
     port: int = 8765,
     static_dir: str | Path = DEFAULT_STATIC_DIR,
     audio_transcriber: AudioTranscriber | None = None,
+    recording_manifest_path: str | Path = DEFAULT_RECORDING_MANIFEST,
 ) -> ThreadingHTTPServer:
     identifier = Phase1Identifier(
         corpus_path,
         manifest_path,
         audio_transcriber=audio_transcriber,
     )
-    handler = _make_handler(identifier, Path(static_dir))
+    handler = _make_handler(identifier, Path(static_dir), Path(recording_manifest_path))
     return ThreadingHTTPServer((host, port), handler)
 
 
-def _make_handler(identifier: Phase1Identifier, static_dir: Path):
+def _make_handler(
+    identifier: Phase1Identifier,
+    static_dir: Path,
+    recording_manifest_path: Path,
+):
     live_sessions: dict[str, SequenceSmoother] = {}
 
     class KhojiRequestHandler(BaseHTTPRequestHandler):
@@ -74,8 +91,28 @@ def _make_handler(identifier: Phase1Identifier, static_dir: Path):
                     {"ok": True, "clips": len(identifier.clips), "live_sessions": len(live_sessions)}
                 )
                 return
+            if parsed.path == "/api/labeler-state":
+                query = parse_qs(parsed.query)
+                recording_id = (query.get("recording_id") or [""])[0]
+                self._send_json(
+                    _labeler_state(
+                        identifier,
+                        recording_manifest_path,
+                        recording_id=recording_id,
+                    )
+                )
+                return
+            if parsed.path == "/api/recording-audio":
+                query = parse_qs(parsed.query)
+                recording_id = (query.get("recording_id") or [""])[0]
+                recording = _recording_by_id(recording_manifest_path, recording_id)
+                self._send_binary_file(_recording_audio_path(recording_manifest_path, recording))
+                return
             if parsed.path == "/":
                 self._send_static_file(static_dir / "index.html")
+                return
+            if parsed.path == "/labeler":
+                self._send_static_file(static_dir / "labeler.html")
                 return
             static_path = (static_dir / parsed.path.lstrip("/")).resolve()
             if not _is_relative_to(static_path, static_dir.resolve()):
@@ -137,6 +174,36 @@ def _make_handler(identifier: Phase1Identifier, static_dir: Path):
                         identifier.identify_text(query, translation_language=language)
                     )
                     return
+                if parsed.path == "/api/label-line-click":
+                    payload = self._read_json()
+                    result = _label_line_click(
+                        identifier,
+                        recording_manifest_path,
+                        recording_id=str(payload["recording_id"]),
+                        line_id=str(payload["line_id"]),
+                        time_s=float(payload["time_s"]),
+                    )
+                    self._send_json(result)
+                    return
+                if parsed.path == "/api/label-finish":
+                    payload = self._read_json()
+                    result = _label_finish(
+                        identifier,
+                        recording_manifest_path,
+                        recording_id=str(payload["recording_id"]),
+                        time_s=float(payload["time_s"]),
+                    )
+                    self._send_json(result)
+                    return
+                if parsed.path == "/api/label-reset":
+                    payload = self._read_json()
+                    result = _label_reset(
+                        identifier,
+                        recording_manifest_path,
+                        recording_id=str(payload["recording_id"]),
+                    )
+                    self._send_json(result)
+                    return
             except (KhojiServerError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
@@ -173,6 +240,17 @@ def _make_handler(identifier: Phase1Identifier, static_dir: Path):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_binary_file(self, path: Path) -> None:
+            if not path.exists() or not path.is_file():
+                self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+                return
+            body = path.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", _content_type(path))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def _send_error(self, status: HTTPStatus, message: str) -> None:
             self._send_json({"ok": False, "error": message}, status=status)
 
@@ -180,6 +258,146 @@ def _make_handler(identifier: Phase1Identifier, static_dir: Path):
             print(f"{self.address_string()} - {format % args}")
 
     return KhojiRequestHandler
+
+
+def _labeler_state(
+    identifier: Phase1Identifier,
+    recording_manifest_path: Path,
+    *,
+    recording_id: str = "",
+) -> dict[str, Any]:
+    recording = _recording_by_id(recording_manifest_path, recording_id)
+    shabad = identifier.shabad_by_id(recording.shabad_id)
+    label_path = _recording_label_path(recording_manifest_path, recording)
+    return {
+        "ok": True,
+        "recording": {
+            "recording_id": recording.recording_id,
+            "shabad_id": recording.shabad_id,
+            "audio_path": recording.audio_path,
+            "duration_ms": recording.duration_ms,
+            "label_path": str(label_path),
+            "audio_url": f"/api/recording-audio?recording_id={recording.recording_id}",
+        },
+        "shabad": {
+            "shabad_id": shabad.shabad_id,
+            "title": shabad.title,
+            "ang": shabad.ang,
+            "raag": shabad.raag,
+            "author": shabad.author,
+            "lines": [_label_line_payload(line) for line in shabad.lines],
+        },
+        "labels": label_segments(load_line_label_rows(label_path)),
+    }
+
+
+def _label_line_click(
+    identifier: Phase1Identifier,
+    recording_manifest_path: Path,
+    *,
+    recording_id: str,
+    line_id: str,
+    time_s: float,
+) -> dict[str, Any]:
+    recording = _recording_by_id(recording_manifest_path, recording_id)
+    shabad = identifier.shabad_by_id(recording.shabad_id)
+    label_path = _recording_label_path(recording_manifest_path, recording)
+    rows = apply_line_click(
+        load_line_label_rows(label_path),
+        shabad,
+        recording_id=recording.recording_id,
+        audio_path=recording.audio_path,
+        line_id=line_id,
+        time_s=time_s,
+    )
+    write_line_label_rows(rows, label_path)
+    return _labeler_state(identifier, recording_manifest_path, recording_id=recording_id)
+
+
+def _label_finish(
+    identifier: Phase1Identifier,
+    recording_manifest_path: Path,
+    *,
+    recording_id: str,
+    time_s: float,
+) -> dict[str, Any]:
+    recording = _recording_by_id(recording_manifest_path, recording_id)
+    label_path = _recording_label_path(recording_manifest_path, recording)
+    rows = finish_open_segment(load_line_label_rows(label_path), time_s=time_s)
+    write_line_label_rows(rows, label_path)
+    return _labeler_state(identifier, recording_manifest_path, recording_id=recording_id)
+
+
+def _label_reset(
+    identifier: Phase1Identifier,
+    recording_manifest_path: Path,
+    *,
+    recording_id: str,
+) -> dict[str, Any]:
+    recording = _recording_by_id(recording_manifest_path, recording_id)
+    label_path = _recording_label_path(recording_manifest_path, recording)
+    write_line_label_rows(reset_label_rows(), label_path)
+    return _labeler_state(identifier, recording_manifest_path, recording_id=recording_id)
+
+
+def _recording_by_id(
+    recording_manifest_path: Path,
+    recording_id: str,
+) -> RecordingLabel:
+    recordings = load_recording_manifest(recording_manifest_path)
+    if not recordings:
+        raise KhojiServerError(f"No recording manifest found at {recording_manifest_path}")
+    if not recording_id:
+        return recordings[0]
+    for recording in recordings:
+        if recording.recording_id == recording_id:
+            return recording
+    raise KhojiServerError(f"Unknown recording_id: {recording_id}")
+
+
+def _recording_audio_path(
+    recording_manifest_path: Path,
+    recording: RecordingLabel,
+) -> Path:
+    audio_path = Path(recording.audio_path)
+    if audio_path.is_absolute():
+        return audio_path
+    return (recording_manifest_path.parent / audio_path).resolve()
+
+
+def _recording_label_path(
+    recording_manifest_path: Path,
+    recording: RecordingLabel,
+) -> Path:
+    if recording.line_labels_path:
+        label_path = Path(recording.line_labels_path)
+        if label_path.is_absolute():
+            return label_path
+        return (recording_manifest_path.parent / label_path).resolve()
+    return (recording_manifest_path.parent / f"{recording.recording_id}.line_labels.tsv").resolve()
+
+
+def _label_line_payload(line) -> dict[str, Any]:
+    return {
+        "line_id": line.line_id,
+        "order": line.order,
+        "gurmukhi": line.gurmukhi,
+        "transliteration": line.transliteration,
+        "text": line.transliteration or line.gurmukhi,
+        "section": line.section,
+        "is_refrain": line.is_refrain,
+        "punjabi_translation": _translation_for_line(line, "Punjabi"),
+        "english_translation": _translation_for_line(line, "English"),
+    }
+
+
+def _translation_for_line(line, language: str) -> str:
+    for translation in line.metadata.get("translations", []):
+        if translation.get("language") == language:
+            return str(translation.get("text", ""))
+    if language == "English":
+        return line.english
+    return ""
 
 
 def _extract_audio_request(body: bytes, content_type: str) -> tuple[bytes, dict[str, str]]:
@@ -217,6 +435,12 @@ def _content_type(path: Path) -> str:
         return "text/css; charset=utf-8"
     if path.suffix == ".js":
         return "application/javascript; charset=utf-8"
+    if path.suffix == ".mp3":
+        return "audio/mpeg"
+    if path.suffix == ".wav":
+        return "audio/wav"
+    if path.suffix == ".webm":
+        return "audio/webm"
     return "application/octet-stream"
 
 

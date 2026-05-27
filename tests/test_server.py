@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -17,12 +18,14 @@ class ServerTests(unittest.TestCase):
             root = Path(directory)
             corpus_path = _write_corpus_fixture(root)
             manifest_path, audio_path = _write_manifest_fixture(root)
+            recording_manifest_path = _write_recording_manifest_fixture(root, audio_path)
             server = create_server(
                 corpus_path=corpus_path,
                 manifest_path=manifest_path,
                 host="127.0.0.1",
                 port=0,
                 static_dir=DEFAULT_STATIC_DIR,
+                recording_manifest_path=recording_manifest_path,
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -54,6 +57,50 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(live_response["status"], "identified")
                 self.assertEqual(live_response["session_id"], "test-session")
                 self.assertEqual(live_response["live"]["status"], "accepted")
+
+                labeler_html = urlopen(f"{base_url}/labeler", timeout=5).read().decode("utf-8")
+                self.assertIn("labelAudio", labeler_html)
+
+                state = json.loads(
+                    urlopen(
+                        f"{base_url}/api/labeler-state?recording_id=recording-1",
+                        timeout=5,
+                    ).read().decode("utf-8")
+                )
+                self.assertEqual(state["recording"]["recording_id"], "recording-1")
+                self.assertEqual(state["shabad"]["lines"][0]["line_id"], "sample_line_1")
+
+                audio_response = urlopen(
+                    f"{base_url}/api/recording-audio?recording_id=recording-1",
+                    timeout=5,
+                ).read()
+                self.assertEqual(audio_response, audio_path.read_bytes())
+
+                first_label = _post_json(
+                    f"{base_url}/api/label-line-click",
+                    {"recording_id": "recording-1", "line_id": "sample_line_1", "time_s": 1.25},
+                )
+                self.assertEqual(first_label["labels"][0]["start_s"], "1.25")
+                self.assertEqual(first_label["labels"][0]["end_s"], "")
+
+                second_label = _post_json(
+                    f"{base_url}/api/label-line-click",
+                    {"recording_id": "recording-1", "line_id": "sample_line_2", "time_s": 4.0},
+                )
+                self.assertEqual(second_label["labels"][0]["end_s"], "4")
+                self.assertEqual(second_label["labels"][1]["line_id"], "sample_line_2")
+
+                finished = _post_json(
+                    f"{base_url}/api/label-finish",
+                    {"recording_id": "recording-1", "time_s": 7.5},
+                )
+                self.assertEqual(finished["labels"][1]["end_s"], "7.5")
+
+                reset = _post_json(
+                    f"{base_url}/api/label-reset",
+                    {"recording_id": "recording-1"},
+                )
+                self.assertEqual(reset["labels"], [])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -101,6 +148,16 @@ def _post_multipart_audio(
     return json.loads(urlopen(request, timeout=5).read().decode("utf-8"))
 
 
+def _post_json(url: str, payload: dict) -> dict:
+    request = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    return json.loads(urlopen(request, timeout=5).read().decode("utf-8"))
+
+
 def _write_manifest_fixture(directory: Path) -> tuple[Path, Path]:
     audio_path = directory / "clip.wav"
     audio_path.write_bytes(b"server fixture audio bytes")
@@ -122,6 +179,27 @@ def _write_manifest_fixture(directory: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     return manifest_path, audio_path
+
+
+def _write_recording_manifest_fixture(directory: Path, audio_path: Path) -> Path:
+    recording_dir = directory / "recordings"
+    recording_dir.mkdir()
+    manifest_path = recording_dir / "manifest.jsonl"
+    record = {
+        "recording_id": "recording-1",
+        "shabad_id": "sample_shabad",
+        "audio_path": os.path.relpath(audio_path, recording_dir),
+        "duration_ms": 10000,
+        "sha256": sha256_file(audio_path),
+        "kind": "kirtan",
+        "split": "dev",
+        "has_vocals": True,
+        "source": "fixture",
+        "notes": "",
+        "line_labels_path": "",
+    }
+    manifest_path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    return manifest_path
 
 
 def _write_corpus_fixture(directory: Path) -> Path:

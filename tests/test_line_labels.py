@@ -5,7 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from khoji.line_labels import build_line_label_template_rows, write_line_label_template
+from khoji.line_labels import (
+    apply_line_click,
+    build_line_label_template_rows,
+    finish_open_segment,
+    write_line_label_template,
+)
 from khoji.models import Line, Shabad
 
 
@@ -54,6 +59,64 @@ class LineLabelTemplateTests(unittest.TestCase):
 
         self.assertEqual(parsed[0]["audio_path"], "../benchmark/audio/kahe.mp3")
         self.assertEqual(parsed[0]["english_translation"], shabad.lines[0].english)
+
+    def test_line_click_closes_previous_segment_and_starts_next(self) -> None:
+        shabad = _sample_shabad()
+
+        rows = apply_line_click(
+            [],
+            shabad,
+            recording_id="rec",
+            audio_path="audio.mp3",
+            line_id="line_1",
+            time_s=12.3456,
+        )
+        rows = apply_line_click(
+            rows,
+            shabad,
+            recording_id="rec",
+            audio_path="audio.mp3",
+            line_id="line_1",
+            time_s=20.0,
+        )
+
+        self.assertEqual(rows[0]["start_s"], "12.346")
+        self.assertEqual(rows[0]["end_s"], "20")
+        self.assertEqual(rows[1]["line_id"], "line_1")
+        self.assertEqual(rows[1]["start_s"], "20")
+        self.assertEqual(rows[1]["end_s"], "")
+
+    def test_finish_open_segment_records_final_end_time(self) -> None:
+        shabad = _sample_shabad()
+        rows = apply_line_click(
+            [],
+            shabad,
+            recording_id="rec",
+            audio_path="audio.mp3",
+            line_id="line_1",
+            time_s=5.0,
+        )
+
+        finished = finish_open_segment(rows, time_s=9.25)
+
+        self.assertEqual(finished[0]["end_s"], "9.25")
+
+
+def _sample_shabad() -> Shabad:
+    return Shabad(
+        shabad_id="SGGS:DSB",
+        title="Kahe Re Ban",
+        lines=(
+            Line(
+                shabad_id="SGGS:DSB",
+                line_id="line_1",
+                order=1,
+                gurmukhi="",
+                transliteration="kaahe re; ban khojan jaaee |",
+                english="Why do you go looking for Him in the forest?",
+            ),
+        ),
+    )
 
 
 if __name__ == "__main__":

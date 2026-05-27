@@ -132,6 +132,19 @@ PYTHONPATH=src python3 -m khoji create-line-label-template \
 This writes `data/phase1/recordings/kahe_re_ban_full_001.line_labels.tsv`.
 See `docs/line_labeling.md` for the column guide.
 
+For faster manual labeling, run the browser labeler:
+
+```bash
+PYTHONPATH=src python3 -m khoji serve \
+  --corpus data/shabados/sggs.jsonl \
+  --recordings data/phase1/recordings/manifest.jsonl
+```
+
+Then open `http://127.0.0.1:8765/labeler?recording_id=kahe_re_ban_full_001`.
+Play the recording and click the current shabad line. Each click closes the
+previous segment and starts the selected line at the current audio time. `Finish`
+closes the final segment; `Reset` clears the generated TSV.
+
 ### Surt ASR Baseline
 
 Khoji can also use `surindersinghssj/surt-small-v3` as an optional ASR fallback for audio that is not in the Phase 1 manifest. This keeps the benchmark path deterministic while allowing arbitrary vocal audio to be transcribed and queried against the complete Shabad OS corpus.

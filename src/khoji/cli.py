@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     serve_parser = subparsers.add_parser("serve")
     serve_parser.add_argument("--corpus", type=Path, default=Path("data/shabados/sggs.jsonl"))
     serve_parser.add_argument("--manifest", type=Path, default=Path("data/phase1/benchmark/manifest.jsonl"))
+    serve_parser.add_argument("--recordings", type=Path, default=Path("data/phase1/recordings/manifest.jsonl"))
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8765)
     serve_parser.add_argument("--asr-model", choices=["none", "surt-small-v3"], default="none")
@@ -123,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
                 host=args.host,
                 port=args.port,
                 audio_transcriber=transcriber,
+                recording_manifest_path=args.recordings,
             )
             return 0
 

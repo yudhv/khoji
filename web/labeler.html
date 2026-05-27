@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Khoji Labeler</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="labeler-body">
+    <main class="labeler-shell">
+      <header class="labeler-header">
+        <div>
+          <div class="eyebrow">Khoji Labeler</div>
+          <h1 id="labelerTitle">Loading recording...</h1>
+          <p id="labelerMeta" class="shabad-details"></p>
+        </div>
+        <a class="plain-link" href="/">Reader</a>
+      </header>
+
+      <section class="labeler-media" aria-label="Recording controls">
+        <audio id="labelAudio" controls preload="metadata"></audio>
+        <div class="labeler-toolbar">
+          <div class="time-readout">
+            <span id="currentTime">00:00.000</span>
+            <span id="activeLabel">No active segment</span>
+          </div>
+          <div class="labeler-actions">
+            <button id="finishButton" class="secondary-button" type="button">Finish</button>
+            <button id="resetButton" class="danger-button" type="button">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="labeler-workspace">
+        <section class="line-picker" aria-label="Shabad lines">
+          <div class="search-row">
+            <input id="lineSearch" type="search" placeholder="Search line" autocomplete="off" />
+          </div>
+          <div id="lineList" class="label-line-list"></div>
+        </section>
+
+        <section class="segment-panel" aria-label="Recorded labels">
+          <div class="segment-heading">
+            <h2>Segments</h2>
+            <p id="labelStatus">Ready</p>
+          </div>
+          <div id="segmentList" class="segment-list"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/labeler.js"></script>
+  </body>
+</html>
