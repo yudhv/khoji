@@ -37,6 +37,10 @@ class ServerTests(unittest.TestCase):
                 self.assertIn("micButton", html)
                 self.assertIn("mediaPlayer", html)
                 self.assertIn("Add media", html)
+                app_js = urlopen(f"{base_url}/app.js", timeout=5).read().decode("utf-8")
+                self.assertIn("mic-recording.webm", app_js)
+                self.assertIn("start_s: start", app_js)
+                self.assertNotIn("live-window.webm", app_js)
 
                 response = _post_multipart_audio(
                     f"{base_url}/api/identify-audio",

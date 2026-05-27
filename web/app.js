@@ -21,13 +21,13 @@ let mediaTimer = null;
 let lastMediaSentAt = 0;
 let liveRequestInFlight = false;
 let lockedShabadId = "";
+let micStartedAt = 0;
+let lastMicSentAt = 0;
 
 const CHUNK_MS = 2000;
-const ROLLING_CHUNKS = 5;
-const MIN_ROLLING_CHUNKS = 4;
-const MEDIA_WINDOW_S = 12;
-const MEDIA_HOP_S = 5;
-const MIN_MEDIA_WINDOW_S = 8;
+const LIVE_WINDOW_S = 12;
+const LIVE_HOP_S = 5;
+const MIN_LIVE_WINDOW_S = 8;
 
 audioFile.addEventListener("change", () => {
   const file = audioFile.files?.[0];
@@ -63,17 +63,26 @@ micButton.addEventListener("click", async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     chunks = [];
+    micStartedAt = performance.now();
+    lastMicSentAt = 0;
     recorder = new MediaRecorder(stream);
     recorder.addEventListener("dataavailable", async (event) => {
-      if (event.data.size === 0 || liveRequestInFlight) return;
+      if (event.data.size === 0) return;
       chunks.push(event.data);
-      chunks = chunks.slice(-ROLLING_CHUNKS);
-      if (chunks.length < MIN_ROLLING_CHUNKS) {
-        setStatus(`Collecting ${MIN_ROLLING_CHUNKS * (CHUNK_MS / 1000)}s audio...`);
+      const elapsed = Math.max(0, (performance.now() - micStartedAt) / 1000);
+      if (elapsed < MIN_LIVE_WINDOW_S) {
+        setStatus(`Collecting ${Math.ceil(MIN_LIVE_WINDOW_S - elapsed)}s more audio...`);
         return;
       }
-      const windowBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-      await identifyLiveChunk(windowBlob, "live-window.webm", {
+      if (liveRequestInFlight || elapsed - lastMicSentAt < LIVE_HOP_S) return;
+
+      const duration = Math.min(LIVE_WINDOW_S, elapsed);
+      const start = Math.max(0, elapsed - duration);
+      lastMicSentAt = elapsed;
+      const recordingBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      await identifyLiveChunk(recordingBlob, "mic-recording.webm", {
+        start_s: start,
+        duration_s: duration,
         statusPrefix: "Mic",
       });
     });
@@ -133,13 +142,13 @@ async function classifyMediaWindow(force) {
   if (liveRequestInFlight) return;
 
   const currentTime = mediaPlayer.currentTime || 0;
-  if (currentTime < MIN_MEDIA_WINDOW_S) {
-    setStatus(`Collecting ${Math.ceil(MIN_MEDIA_WINDOW_S - currentTime)}s more audio...`);
+  if (currentTime < MIN_LIVE_WINDOW_S) {
+    setStatus(`Collecting ${Math.ceil(MIN_LIVE_WINDOW_S - currentTime)}s more audio...`);
     return;
   }
-  if (!force && currentTime - lastMediaSentAt < MEDIA_HOP_S) return;
+  if (!force && currentTime - lastMediaSentAt < LIVE_HOP_S) return;
 
-  const duration = Math.min(MEDIA_WINDOW_S, currentTime);
+  const duration = Math.min(LIVE_WINDOW_S, currentTime);
   const start = Math.max(0, currentTime - duration);
   lastMediaSentAt = currentTime;
   await identifyLiveChunk(selectedMediaFile, selectedMediaFile.name || "media", {
